@@ -76,10 +76,9 @@ func (h *HiveshareHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// only owner/member can edit
 	role, err := h.hs.IsMember(r.Context(), id, u.ID)
-	if err != nil || role == "" || role == "viewer" {
-		writeError(w, http.StatusForbidden, "not authorized")
+	if err != nil || !models.CanWrite(role) {
+		writeError(w, http.StatusForbidden, "all access required")
 		return
 	}
 	var req struct {
@@ -102,9 +101,14 @@ func (h *HiveshareHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	role, _ := h.hs.IsMember(r.Context(), id, u.ID)
-	if role != "owner" {
-		writeError(w, http.StatusForbidden, "only owner can delete")
+	hs, err := h.hs.Get(r.Context(), id, u.ID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "hiveshare not found")
+		return
+	}
+	// Only the creator (owner_id) can delete the space; all-access is not enough.
+	if hs.OwnerID != u.ID {
+		writeError(w, http.StatusForbidden, "only the creator can delete this hiveshare")
 		return
 	}
 	if err := h.hs.Delete(r.Context(), id); err != nil {
@@ -122,8 +126,8 @@ func (h *HiveshareHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role, _ := h.hs.IsMember(r.Context(), id, u.ID)
-	if role == "" || role == "viewer" {
-		writeError(w, http.StatusForbidden, "not authorized to invite")
+	if !models.CanWrite(role) {
+		writeError(w, http.StatusForbidden, "all access required to invite")
 		return
 	}
 	var req struct {
@@ -134,8 +138,9 @@ func (h *HiveshareHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "email is required")
 		return
 	}
-	if req.Role == "" {
-		req.Role = "member"
+	req.Role = models.NormalizeRole(req.Role)
+	if req.Role != models.RoleAll && req.Role != models.RoleView {
+		req.Role = models.RoleAll
 	}
 
 	tokenBytes := make([]byte, 24)
@@ -239,7 +244,7 @@ func (h *HiveshareHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if role, _ := h.hs.IsMember(r.Context(), id, u.ID); role == "" {
+	if role, _ := h.hs.IsMember(r.Context(), id, u.ID); !models.CanView(role) {
 		writeError(w, http.StatusForbidden, "not a member")
 		return
 	}
@@ -247,6 +252,9 @@ func (h *HiveshareHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	for _, m := range members {
+		m.Role = models.NormalizeRole(m.Role)
 	}
 	writeJSON(w, http.StatusOK, members)
 }
@@ -264,8 +272,9 @@ func (h *HiveshareHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	role, _ := h.hs.IsMember(r.Context(), id, u.ID)
-	if role != "owner" && u.ID != targetID {
-		writeError(w, http.StatusForbidden, "not authorized")
+	// all-access can remove others; anyone can leave themselves
+	if !models.CanWrite(role) && u.ID != targetID {
+		writeError(w, http.StatusForbidden, "all access required")
 		return
 	}
 	_ = h.hs.RemoveMember(r.Context(), id, targetID)
@@ -280,7 +289,7 @@ func (h *HiveshareHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if role, _ := h.hs.IsMember(r.Context(), id, u.ID); role == "" {
+	if role, _ := h.hs.IsMember(r.Context(), id, u.ID); !models.CanView(role) {
 		writeError(w, http.StatusForbidden, "not a member")
 		return
 	}

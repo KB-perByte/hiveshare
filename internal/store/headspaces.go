@@ -37,7 +37,7 @@ func (s *HiveshareStore) Create(ctx context.Context, name, description string, o
 	}
 
 	_, err = tx.Exec(ctx,
-		`INSERT INTO hiveshare_members (hiveshare_id, user_id, role) VALUES ($1, $2, 'owner')`,
+		`INSERT INTO hiveshare_members (hiveshare_id, user_id, role) VALUES ($1, $2, 'all')`,
 		hs.ID, ownerID,
 	)
 	if err != nil {
@@ -47,7 +47,7 @@ func (s *HiveshareStore) Create(ctx context.Context, name, description string, o
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	hs.Role = "owner"
+	hs.Role = models.RoleAll
 	hs.MemberCount = 1
 	return &hs, nil
 }
@@ -73,6 +73,7 @@ func (s *HiveshareStore) ListForUser(ctx context.Context, userID uuid.UUID) ([]*
 			&hs.CreatedAt, &hs.UpdatedAt, &hs.Role, &hs.MemberCount); err != nil {
 			return nil, err
 		}
+		hs.Role = models.NormalizeRole(hs.Role)
 		result = append(result, &hs)
 	}
 	return result, rows.Err()
@@ -92,6 +93,7 @@ func (s *HiveshareStore) Get(ctx context.Context, id, userID uuid.UUID) (*models
 	if err != nil {
 		return nil, fmt.Errorf("get hiveshare: %w", err)
 	}
+	hs.Role = models.NormalizeRole(hs.Role)
 	return &hs, nil
 }
 
@@ -123,7 +125,10 @@ func (s *HiveshareStore) IsMember(ctx context.Context, hiveshareID, userID uuid.
 	if err == pgx.ErrNoRows {
 		return "", nil
 	}
-	return role, err
+	if err != nil {
+		return "", err
+	}
+	return models.NormalizeRole(role), nil
 }
 
 func (s *HiveshareStore) ListMembers(ctx context.Context, hiveshareID uuid.UUID) ([]*models.Member, error) {
@@ -145,20 +150,29 @@ func (s *HiveshareStore) ListMembers(ctx context.Context, hiveshareID uuid.UUID)
 		if err := rows.Scan(&m.HiveshareID, &m.UserID, &m.Name, &m.Email, &m.Role, &m.InvitedBy, &m.JoinedAt); err != nil {
 			return nil, err
 		}
+		m.Role = models.NormalizeRole(m.Role)
 		result = append(result, &m)
 	}
 	return result, rows.Err()
 }
 
 func (s *HiveshareStore) RemoveMember(ctx context.Context, hiveshareID, userID uuid.UUID) error {
+	// Never remove the hiveshare creator (owner_id).
 	_, err := s.db.Exec(ctx,
-		`DELETE FROM hiveshare_members WHERE hiveshare_id = $1 AND user_id = $2 AND role != 'owner'`,
+		`DELETE FROM hiveshare_members hm
+		 USING hiveshares h
+		 WHERE hm.hiveshare_id = $1 AND hm.user_id = $2
+		   AND h.id = hm.hiveshare_id AND h.owner_id <> $2`,
 		hiveshareID, userID,
 	)
 	return err
 }
 
 func (s *HiveshareStore) AddMember(ctx context.Context, hiveshareID, userID, invitedBy uuid.UUID, role string) error {
+	role = models.NormalizeRole(role)
+	if role != models.RoleAll && role != models.RoleView {
+		role = models.RoleAll
+	}
 	_, err := s.db.Exec(ctx,
 		`INSERT INTO hiveshare_members (hiveshare_id, user_id, role, invited_by)
 		 VALUES ($1, $2, $3, $4)
@@ -170,6 +184,10 @@ func (s *HiveshareStore) AddMember(ctx context.Context, hiveshareID, userID, inv
 
 // CreateInvitation creates a pending invitation.
 func (s *HiveshareStore) CreateInvitation(ctx context.Context, inv *models.Invitation) error {
+	inv.Role = models.NormalizeRole(inv.Role)
+	if inv.Role != models.RoleAll && inv.Role != models.RoleView {
+		inv.Role = models.RoleAll
+	}
 	_, err := s.db.Exec(ctx,
 		`INSERT INTO invitations (hiveshare_id, email, invited_by, token, role)
 		 VALUES ($1, $2, $3, $4, $5)`,

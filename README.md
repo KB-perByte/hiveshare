@@ -139,7 +139,7 @@ hshare memory add --source-ref REF [--source-type TYPE] [--tool TOOL] [< file]
 hshare memory search QUERY [--limit N] [--source-type TYPE]
 hshare memory list [--source-type TYPE] [--limit N]
 
-hshare invite EMAIL [--role member|viewer]
+hshare invite EMAIL [--role all|view]
 hshare members list
 
 hshare stream
@@ -147,7 +147,8 @@ hshare metrics [--me]
 ```
 
 Source types: `jira`, `github_issue`, `github_pr`, `file`, `url`, `manual`  
-Tools: `claude`, `cursor`, `manual`
+Tools: `claude`, `cursor`, `manual`  
+Roles: `all` (invite + read + write memory) · `view` (read-only)
 
 ---
 
@@ -197,7 +198,7 @@ MCP sidecar ──┘                    │  embed workers, health
 - List endpoints omit full `content` (use Get/Search for body text)
 - Ops: `GET /health` checks Postgres + Redis
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams, scale analysis, and the V2/V3 roadmap. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams, scale analysis, and the V2/V3 roadmap. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides. See [`docs/DEMO.md`](docs/DEMO.md) for a full EC2 + Fedora + Mac two-person demo script (all CLI commands).
 
 ---
 

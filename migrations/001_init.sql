@@ -22,11 +22,11 @@ CREATE TABLE hiveshares (
 CREATE TABLE hiveshare_members (
     hiveshare_id UUID NOT NULL REFERENCES hiveshares(id) ON DELETE CASCADE,
     user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role         TEXT NOT NULL DEFAULT 'member',
+    role         TEXT NOT NULL DEFAULT 'all',
     invited_by   UUID REFERENCES users(id),
     joined_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (hiveshare_id, user_id),
-    CONSTRAINT valid_role CHECK (role IN ('owner', 'member', 'viewer'))
+    CONSTRAINT valid_role CHECK (role IN ('all', 'view'))
 );
 
 CREATE TABLE invitations (
@@ -35,7 +35,7 @@ CREATE TABLE invitations (
     email        TEXT NOT NULL,
     invited_by   UUID NOT NULL REFERENCES users(id),
     token        TEXT UNIQUE NOT NULL,
-    role         TEXT NOT NULL DEFAULT 'member',
+    role         TEXT NOT NULL DEFAULT 'all',
     status       TEXT NOT NULL DEFAULT 'pending',
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at   TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',

@@ -36,7 +36,7 @@ func NewMemoryHandler(
 	}
 }
 
-func (h *MemoryHandler) requireAccess(r *http.Request, w http.ResponseWriter, minRole string) (uuid.UUID, bool) {
+func (h *MemoryHandler) requireAccess(r *http.Request, w http.ResponseWriter, writeRequired bool) (uuid.UUID, bool) {
 	u := currentUser(r)
 	id, err := parseUUID(r, "id")
 	if err != nil {
@@ -44,19 +44,19 @@ func (h *MemoryHandler) requireAccess(r *http.Request, w http.ResponseWriter, mi
 		return uuid.Nil, false
 	}
 	role, _ := h.hs.IsMember(r.Context(), id, u.ID)
-	if role == "" {
+	if !models.CanView(role) {
 		writeError(w, http.StatusForbidden, "not a member of this hiveshare")
 		return uuid.Nil, false
 	}
-	if minRole == "member" && role == "viewer" {
-		writeError(w, http.StatusForbidden, "viewer role cannot write")
+	if writeRequired && !models.CanWrite(role) {
+		writeError(w, http.StatusForbidden, "view access cannot write memory")
 		return uuid.Nil, false
 	}
 	return id, true
 }
 
 func (h *MemoryHandler) List(w http.ResponseWriter, r *http.Request) {
-	hsID, ok := h.requireAccess(r, w, "viewer")
+	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
 	}
@@ -86,7 +86,7 @@ func (h *MemoryHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	hsID, ok := h.requireAccess(r, w, "member")
+	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
 		return
 	}
@@ -159,7 +159,7 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MemoryHandler) Get(w http.ResponseWriter, r *http.Request) {
-	hsID, ok := h.requireAccess(r, w, "viewer")
+	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
 	}
@@ -192,7 +192,7 @@ func (h *MemoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MemoryHandler) Update(w http.ResponseWriter, r *http.Request) {
-	hsID, ok := h.requireAccess(r, w, "member")
+	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
 		return
 	}
@@ -224,7 +224,7 @@ func (h *MemoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MemoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	hsID, ok := h.requireAccess(r, w, "member")
+	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
 		return
 	}
@@ -239,7 +239,7 @@ func (h *MemoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *MemoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	hsID, ok := h.requireAccess(r, w, "viewer")
+	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
 	}
@@ -288,7 +288,7 @@ func (h *MemoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MemoryHandler) Stream(w http.ResponseWriter, r *http.Request) {
-	hsID, ok := h.requireAccess(r, w, "viewer")
+	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
 	}

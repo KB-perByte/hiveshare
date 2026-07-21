@@ -70,10 +70,12 @@ func main() {
 		addr = ":8080"
 	}
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		Addr: addr,
+		Handler: router,
+		// ReadHeaderTimeout bounds slowloris; do NOT set WriteTimeout globally —
+		// it kills long-lived SSE (/stream) after N seconds with unexpected EOF.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	slog.Info("hiveshare server listening", "addr", addr)

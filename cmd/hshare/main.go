@@ -390,7 +390,7 @@ func inviteCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&role, "role", "member", "Role: member or viewer")
+	cmd.Flags().StringVar(&role, "role", "all", "Role: all (invite/read/write) or view (read-only)")
 	cmd.Flags().StringVar(&hsID, "hiveshare", "", "Hiveshare ID (uses default)")
 	return cmd
 }
@@ -457,17 +457,26 @@ func streamCmd() *cobra.Command {
 				c.BaseURL+"/api/v1/hiveshares/"+hsID+"/stream", nil)
 			req.Header.Set("Authorization", "Bearer "+c.APIKey)
 			req.Header.Set("Accept", "text/event-stream")
+			req.Header.Set("Cache-Control", "no-cache")
 
-			resp, err := http.DefaultClient.Do(req)
+			// No client timeout — SSE is long-lived.
+			client := &http.Client{Timeout: 0}
+			resp, err := client.Do(req)
 			if err != nil {
 				return err
 			}
 			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("stream failed: HTTP %d", resp.StatusCode)
+			}
 
 			scanner := bufio.NewScanner(resp.Body)
 			var eventType string
 			for scanner.Scan() {
 				line := scanner.Text()
+				if strings.HasPrefix(line, ":") {
+					continue // keepalive comment
+				}
 				if strings.HasPrefix(line, "event: ") {
 					eventType = strings.TrimPrefix(line, "event: ")
 				} else if strings.HasPrefix(line, "data: ") {
@@ -493,7 +502,10 @@ func streamCmd() *cobra.Command {
 					eventType = ""
 				}
 			}
-			return scanner.Err()
+			if err := scanner.Err(); err != nil {
+				return fmt.Errorf("stream closed: %w (server restarted, network drop, or proxy idle timeout — re-run hshare stream)", err)
+			}
+			return fmt.Errorf("stream closed by server (re-run hshare stream)")
 		},
 	}
 }

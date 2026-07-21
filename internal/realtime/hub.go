@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -54,11 +55,17 @@ func (h *Hub) ServeSSE(w http.ResponseWriter, r *http.Request, hiveshareID uuid.
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "SSE not supported", http.StatusInternalServerError)
 		return
+	}
+
+	// Disable write deadline for this long-lived response if the server set one.
+	if rc := http.NewResponseController(w); rc != nil {
+		_ = rc.SetWriteDeadline(time.Time{})
 	}
 
 	ch := make(chan []byte, 32)
@@ -71,10 +78,17 @@ func (h *Hub) ServeSSE(w http.ResponseWriter, r *http.Request, hiveshareID uuid.
 	fmt.Fprintf(w, "event: connected\ndata: {\"hiveshare_id\":\"%s\"}\n\n", hiveshareID)
 	flusher.Flush()
 
+	keepalive := time.NewTicker(25 * time.Second)
+	defer keepalive.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-keepalive.C:
+			// Comment frame keeps proxies / LBs from idle-closing the socket.
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
 		case data, ok := <-ch:
 			if !ok {
 				return
