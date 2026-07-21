@@ -16,10 +16,11 @@ Bob opens PROJ-42 with Cursor       →  MCP tool loads Alice's memory automatic
 
 - **Isolated hiveshares** — one per project, story, or sprint; fully separate memory spaces
 - **Invite by email** — token-based, no SMTP required; teammates get their own API key on accept
-- **Live sync** — `hshare stream` shows new entries from any teammate in real time (SSE)
-- **Semantic search** — OpenAI or Ollama embeddings; falls back to PostgreSQL full-text if not configured
+- **Live sync** — `hshare stream` shows new entries from any teammate in real time (SSE; one Redis sub per hiveshare)
+- **Semantic search** — OpenAI or Ollama embeddings (async on write, HNSW index); falls back to PostgreSQL full-text if not configured
 - **MCP integration** — Claude Code and Cursor can search and save memory automatically without you doing anything
 - **Metrics** — reuse rate, top contributors, source coverage, 7-day activity
+- **Hardened API** — hashed API keys, rate limits, body size cap, request timeouts, `GET /health`
 
 ---
 
@@ -55,7 +56,8 @@ go install github.com/KB-perByte/hiveshare/cmd/hshare@latest
 
 ```bash
 hshare auth register --email you@example.com --name "Alice"
-# Saves your API key to ~/.config/hiveshare/config.json
+# Prints your API key once and saves it to ~/.config/hiveshare/config.json
+# (server stores only SHA-256 of the key — save it now)
 
 hshare headspace create "PROJ-42 Sprint"
 hshare headspace list          # note the ID
@@ -183,13 +185,19 @@ Tools: `claude`, `cursor`, `manual`
 ```
 hshare CLI  ──┐
                ├──  REST + SSE  ──  hiveshare-server (Go)
-MCP sidecar ──┘                          │
-                                  ┌──────┴──────┐
-                            PostgreSQL      Redis
-                           + pgvector      pub/sub
+MCP sidecar ──┘                    │  embed workers, health
+                            ┌──────┴──────┐
+                      PostgreSQL      Redis
+                     + pgvector      pub/sub + view counters
+                        HNSW
 ```
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a deep review, scale analysis, Mermaid diagrams, and a prioritised fix list. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides.
+- Auth: Bearer `hvs_…` key; **SHA-256 at rest**, cleartext returned only at registration
+- Writes: memory inserts immediately; embeddings filled async (search uses full-text until ready)
+- List endpoints omit full `content` (use Get/Search for body text)
+- Ops: `GET /health` checks Postgres + Redis
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams, scale analysis, and the V2/V3 roadmap. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides.
 
 ---
 
@@ -238,7 +246,7 @@ OpenShift manifests are in [`deploy/openshift/`](deploy/openshift/).
 
 ## Contributing
 
-Issues and PRs welcome. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) section 7 for the prioritised list of known issues to fix.
+Issues and PRs welcome. P0–P2 hardening is done; see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) section 7 for remaining V2/V3 scale work.
 
 ---
 

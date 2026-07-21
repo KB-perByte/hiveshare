@@ -23,6 +23,13 @@ make dev
 
 The server listens on `:8080` by default. Override with `LISTEN_ADDR=:9000`.
 
+Health check (Postgres + Redis):
+
+```bash
+curl -s http://localhost:8080/health
+# {"status":"ok","db":"ok","redis":"ok"}
+```
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -49,7 +56,7 @@ The server listens on `:8080` by default. Override with `LISTEN_ADDR=:9000`.
 make cli
 # or: make install  (copies to /usr/local/bin)
 
-# Register
+# Register (API key is shown once — server stores SHA-256 only)
 ./bin/hshare auth register --email you@example.com --name "Alice"
 
 # Create a hiveshare
@@ -136,8 +143,10 @@ Show me metrics for this hiveshare.
 1. Team member A runs: `hshare invite bob@example.com`
 2. An invite link is printed: `http://localhost:8080/api/v1/invitations/<token>/accept`
 3. Bob opens the link (or POSTs to it with `{"name": "Bob"}`)
-4. Bob gets a new account and is added to the hiveshare
-5. Bob registers their API key with the CLI/MCP and starts sharing memory
+4. Bob gets a new account (API key returned once) and is added to the hiveshare
+5. Bob saves the key in CLI/MCP config and starts sharing memory
+
+Invites are rejected in SQL when `status != 'pending'` or `expires_at` has passed (default 7 days).
 
 ## Metrics
 
@@ -151,15 +160,17 @@ Show me metrics for this hiveshare.
 
 ```
 hiveshare/
-├── cmd/server/     API server
+├── cmd/server/     API server (embed workers, view flusher, event TTL)
 ├── cmd/mcp/        MCP sidecar (connect to Claude/Cursor)
 ├── cmd/hshare/     CLI
 ├── internal/
-│   ├── api/        HTTP handlers + router
-│   ├── embed/      Embedding backends (OpenAI, Ollama, no-op)
+│   ├── api/        HTTP handlers + router (rate limit, timeout, /health)
+│   ├── embed/      Embedding backends + async worker pool
 │   ├── mcp/        MCP protocol + tool definitions
 │   ├── models/     Domain types
-│   ├── realtime/   Redis pub/sub + SSE hub
-│   └── store/      PostgreSQL queries
-└── migrations/     SQL schema
+│   ├── realtime/   Redis pub/sub + shared SSE hub
+│   └── store/      PostgreSQL + Redis view counters
+└── migrations/     SQL schema (HNSW vector index in 002/003)
 ```
+
+Memory **list** returns metadata without full `content` (keeps MCP/CLI payloads small). Use get or search for body text. Embeddings are written asynchronously after add/update; until then, search falls back to full-text for those rows.

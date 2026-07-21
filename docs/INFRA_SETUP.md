@@ -103,7 +103,7 @@ Send Bob the link. He accepts it with curl or a browser:
 curl -X POST https://abc123.ngrok-free.app/api/v1/invitations/<token>/accept \
   -H "Content-Type: application/json" \
   -d '{"name": "Bob"}'
-# Returns Bob's hvs_ api_key
+# Returns Bob's hvs_ api_key (save it — only returned once; server stores SHA-256)
 ```
 
 ### Step 6 — Bob configures his client

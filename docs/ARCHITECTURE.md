@@ -1,6 +1,6 @@
-# HiveShare — Deep Architecture Review
+# HiveShare — Architecture
 
-> **Scope:** Full review of the current implementation against production and scale requirements, with a prioritised fix list and a three-stage evolution roadmap.
+> **Status:** P0–P2 hardening from the initial review is **implemented**. This doc describes the as-built system, remaining scale work (V2/V3), and research notes.
 
 ---
 
@@ -14,18 +14,20 @@ graph TB
     end
 
     subgraph Server["API Server (single binary)"]
-        Router["chi Router\n+ Auth Middleware"]
+        Router["chi Router\n+ Auth / rate limit / timeout"]
         AuthH["Auth Handler"]
         HSH["Hiveshare Handler"]
         MemH["Memory Handler\n(search / add / stream)"]
         MetH["Metrics Handler"]
-        Embed["Embedder\n(OpenAI / Ollama / No-op)"]
-        Hub["SSE Hub\n(Redis pub/sub)"]
+        Health["GET /health"]
+        EmbedW["Embed Worker Pool\n(async)"]
+        Hub["SSE Hub\n(1 Redis sub / hiveshare)"]
+        Views["ViewCounter\n(Redis INCR → PG flush)"]
     end
 
     subgraph Storage["Persistence"]
-        PG[("PostgreSQL 16\n+ pgvector")]
-        Redis[("Redis 7\npub/sub")]
+        PG[("PostgreSQL 16\n+ pgvector HNSW")]
+        Redis[("Redis 7\npub/sub + view deltas")]
     end
 
     CLI -->|REST + Bearer token| Router
@@ -34,14 +36,20 @@ graph TB
     Router --> HSH
     Router --> MemH
     Router --> MetH
-    MemH --> Embed
+    Router --> Health
+    MemH -->|enqueue| EmbedW
+    EmbedW -->|UPDATE embedding| PG
     MemH --> Hub
-    Hub -->|SUBSCRIBE per connection| Redis
+    MemH --> Views
+    Hub -->|1 SUBSCRIBE / hiveshare| Redis
     Hub -->|SSE stream| CLI
+    Views -->|INCR / SCAN flush| Redis
     AuthH --> PG
     HSH --> PG
     MemH --> PG
     MetH --> PG
+    Health --> PG
+    Health --> Redis
     Hub -->|PUBLISH| Redis
 ```
 
@@ -49,143 +57,75 @@ graph TB
 
 | Component | Implementation | File |
 |---|---|---|
-| HTTP router | chi v5 | `internal/api/router.go` |
-| Auth | Bearer API key, plaintext lookup | `internal/api/middleware.go`, `store/users.go` |
-| DB pool | pgxpool — **default config** | `internal/store/db.go` |
-| Vector search | pgvector ivfflat cosine | `internal/store/memory.go:135` |
-| Full-text fallback | `plainto_tsquery` + `ts_rank` | `internal/store/memory.go:165` |
-| Embedding | Sync HTTP call in request path | `internal/embed/embed.go` |
-| Real-time | Redis pub/sub → SSE | `internal/realtime/hub.go` |
+| HTTP router | chi v5 + httprate (60/min), RequestSize 1MB, Timeout 30s (SSE excluded) | `internal/api/router.go` |
+| Auth | Bearer API key; **SHA-256 at rest**, cleartext only at register | `internal/api/middleware.go`, `store/users.go` |
+| DB pool | pgxpool MaxConns=20, MinConns=4, lifetimes set; `ivfflat.probes=10` AfterConnect | `internal/store/db.go` |
+| Vector search | pgvector **HNSW** cosine | `migrations/002_indexes.sql`, `003_hardening.sql` |
+| Full-text fallback | `plainto_tsquery` + `ts_rank` | `internal/store/memory.go` |
+| Embedding | **Async** worker pool; HTTP path stores `embedding = NULL` then UPDATE | `internal/embed/worker.go` |
+| Real-time | One Redis sub per hiveshare → fan-out to local SSE clients | `internal/realtime/hub.go` |
+| Views | Redis `INCR`, flush to Postgres every 60s | `internal/store/views.go` |
+| usage_events TTL | Rolling delete > 90 days (daily job) | `cmd/server/main.go` |
+| Health | `GET /health` — DB + Redis ping | `internal/api/router.go` |
+| Logging | `slog` JSON | `cmd/server/main.go` |
 | MCP server | stdio JSON-RPC | `internal/mcp/server.go` |
 
 ---
 
-## 2. Critical Issues (found in code, fix before team use)
+## 2. Hardening status (P0–P2)
 
-### P0 — Correctness bugs
+All items below were found in the initial review and are **fixed in tree**.
 
-#### 2.1 One Redis subscription per SSE client connection
-**File:** `internal/realtime/hub.go:64`
-```go
-sub := h.rdb.Subscribe(ctx, channel)   // ← called inside ServeSSE
-```
-Every client connecting to `GET /hiveshares/:id/stream` opens its **own** Redis subscription to the same channel. With 10 people in a hiveshare, that's 10 identical Redis SUBSCRIBE commands. Redis limits connections per node; this pattern also means the in-memory `clients` map (lines 22-28) is fully unused — subscriptions and fan-out both happen per-connection via Redis directly, making the map dead code.
-
-**Fix:** One goroutine per hiveshare per server instance holds the single Redis subscription; all local SSE clients share it via the in-memory channel map that's already there but unused.
-
-#### 2.2 pgxpool at default MaxConns
-**File:** `internal/store/db.go:12`
-```go
-pool, err := pgxpool.New(ctx, dsn)
-```
-No `MaxConns`, `MinConns`, or `MaxConnLifetime` set. pgxpool defaults to `max(4, numCPU)` connections. Under any concurrent load this will queue silently. PostgreSQL's default `max_connections = 100`; every server instance depletes this budget.
-
-**Fix:** Set explicit pool config. Minimum for production:
-```go
-cfg.MaxConns = 20
-cfg.MinConns = 4
-cfg.MaxConnLifetime = 30 * time.Minute
-cfg.MaxConnIdleTime = 5 * time.Minute
-```
-
-#### 2.3 ivfflat index without probes setting
-**File:** `migrations/002_indexes.sql:2`
-```sql
-CREATE INDEX … USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-```
-The index is created but `ivfflat.probes` (how many lists to search at query time) is never set. The default is **1**, meaning ~1% recall at 100 lists. Searches will return semantically wrong results.
-
-**Fix:** Set per-session or server-wide:
-```sql
-SET ivfflat.probes = 10;   -- add to connection pool AfterConnect hook
-```
-Or use HNSW index (pgvector ≥ 0.5), which has no probe tuning and better recall:
-```sql
-CREATE INDEX ON memory_entries USING hnsw (embedding vector_cosine_ops);
-```
-
-#### 2.4 API key stored and compared in plaintext
-**File:** `internal/store/users.go`, `internal/api/middleware.go`
-The API key is stored as `hsk_<48-hex>` directly in the `users.api_key` column. A database read gives instant credential compromise.
-
-**Fix:** Store `SHA-256(api_key)` in the column, compare by hash at auth time. Return the cleartext key only once at registration.
-
-#### 2.5 Full content returned in list queries
-**File:** `internal/store/memory.go:82`
-`SELECT … me.content …` in the `List` query. If entries hold 10KB of crunched context each, a `GET /hiveshares/:id/memory?limit=50` sends 500KB of payload per request. Over MCP this hits token context limits.
-
-**Fix:** Return only `id, source_type, source_ref, summary, tags, views, reuses, created_at` in List. Full content only in Get and Search.
-
----
-
-### P1 — Scalability blockers
-
-#### 2.6 Embedding blocks the HTTP request goroutine
-**File:** `internal/api/memory.go:71`
-```go
-if vec, err := h.embedder.Embed(r.Context(), req.Content); err == nil …
-```
-OpenAI `text-embedding-3-small` adds 100–500ms of latency to every `POST /memory` call, during which the goroutine is parked on an outbound HTTP socket. Under 50 concurrent adds, this saturates the embedding API's per-minute token rate and backs up the pool.
-
-**Fix:** Queue embedding work through a buffered channel worker pool. Store entry immediately with `embedding = NULL`, embed async, then UPDATE the vector. The search path already handles NULL embeddings via full-text fallback.
-
-#### 2.7 usage_events grows unboundedly
-**File:** `migrations/001_init.sql:66`
-No partitioning, no TTL, no archival plan. At 100 searches/day across a 10-person team, this table accumulates ~36k rows/year. Metrics queries at line `store/metrics.go:76` do full scans with `WHERE created_at >= $2` — these will degrade quickly without a time index.
-
-**Fix:** Partition by month (`PARTITION BY RANGE (created_at)`) or implement a rolling-delete job that removes events older than 90 days.
-
-#### 2.8 views counter UPDATE on every Get
-**File:** `internal/store/memory.go:105`
-```go
-_ = s.db.QueryRow(ctx, `UPDATE memory_entries SET views = views + 1 WHERE id = $1`, id)
-```
-A row-level lock on a hot entry (e.g., "PROJ-123" fetched by 6 people simultaneously) causes contention. Under high parallelism this UPDATE serialises reads.
-
-**Fix:** Use Redis `INCR hiveshare:views:<entry_id>` and flush to Postgres on a 60-second ticker, or use PostgreSQL advisory locks. Alternatively, record views only via `usage_events` and derive counts via aggregation.
-
----
-
-### P2 — Hardening gaps
-
-| # | Issue | Fix |
+| # | Issue | Resolution |
 |---|---|---|
-| 2.9 | No rate limiting on any route | Add `chi-limiter` middleware: 60 req/min per API key |
-| 2.10 | No request body size cap | `r.Use(middleware.RequestSize(1 << 20))` (1MB cap) |
-| 2.11 | No health/readiness endpoint | Add `GET /health` returning DB + Redis ping status |
-| 2.12 | `"userStore"` context key is untyped string | Change to `type userStoreKey struct{}` (already exists for `userStoreKey` struct but not used for this path) |
-| 2.13 | No structured logging | Replace `log.Printf` with `slog` (stdlib since Go 1.21) |
-| 2.14 | No request timeout middleware | `r.Use(middleware.Timeout(30 * time.Second))` |
-| 2.15 | Invite tokens not expiry-checked in DB | `WHERE status='pending' AND expires_at > NOW()` in GetInvitation query |
+| 2.1 | One Redis sub per SSE client | Shared sub per hiveshare; in-memory fan-out |
+| 2.2 | Default pgxpool | Explicit Max/Min/lifetime config |
+| 2.3 | ivfflat probes=1 | Migrated to **HNSW**; AfterConnect still sets probes for safety |
+| 2.4 | Plaintext API keys | SHA-256 stored; cleartext returned once at registration |
+| 2.5 | List returned full content | List omits `content`; Get/Search include it |
+| 2.6 | Sync embed on POST | Buffered embed worker pool |
+| 2.7 | Unbounded `usage_events` | 90-day purge + `created_at` index |
+| 2.8 | Views UPDATE on every Get | Redis INCR + 60s Postgres flush |
+| 2.9 | No rate limit | httprate 60 req/min per API key (or IP) |
+| 2.10 | No body size cap | `RequestSize(1 << 20)` |
+| 2.11 | No health endpoint | `GET /health` |
+| 2.12 | Untyped `"userStore"` key | Typed `userStoreKey struct{}` |
+| 2.13 | `log.Printf` | `slog` |
+| 2.14 | No request timeout | 30s timeout; SSE route excluded |
+| 2.15 | Invite expiry not in SQL | `status='pending' AND expires_at > NOW()` |
+
+**Ops note:** Existing plaintext API keys will not authenticate after the hash change — users must re-register (or accept a fresh invite). Apply migrations through `003_hardening.sql`.
 
 ---
 
 ## 3. Scalability Analysis
 
-### 3.1 Bottleneck map (current)
+### 3.1 Bottleneck map (post-hardening)
 
 ```mermaid
 graph LR
-    A["Add memory\nPOST /memory"] -->|"100-500ms\n⚠ BLOCKS goroutine"| B["Embedding API\n(OpenAI / Ollama)"]
-    A -->|"Sequential"| C["INSERT\nPostgreSQL"]
-    D["Search\nPOST /memory/search"] -->|"embedding first"| B
-    D -->|"ivfflat scan\nprobes=1 ⚠ bad recall"| C
-    E["SSE Stream\nGET /stream"] -->|"1 sub/client ⚠"| F["Redis\npub/sub"]
-    G["Metrics\nGET /metrics"] -->|"full table scan\nno partition ⚠"| C
-    H["Auth check\nevery request"] -->|"DB lookup\nno cache ⚠"| C
+    A["Add memory\nPOST /memory"] -->|"enqueue"| B["Embed Worker"]
+    A -->|"fast INSERT\nembedding=NULL"| C["PostgreSQL"]
+    B -->|"async UPDATE"| C
+    D["Search\nPOST /memory/search"] -->|"embed query"| E["Embedding API"]
+    D -->|"HNSW scan"| C
+    F["SSE Stream"] -->|"1 sub/hiveshare"| G["Redis"]
+    H["Get memory"] -->|"INCR views"| G
+    I["Metrics"] -->|"indexed time range"| C
+    J["Auth"] -->|"DB lookup\n(no cache yet)"| C
 ```
 
 ### 3.2 Per-component scale limits
 
-| Component | Current limit | Bottleneck | Fix |
+| Component | Current state | Remaining bottleneck | Next fix |
 |---|---|---|---|
-| **API server** | 1 instance, no LB | Single point of failure | Stateless; add nginx/caddy LB in front, run 2+ replicas |
-| **PostgreSQL pool** | ~4 connections | Default pgxpool | Explicit pool config; use PgBouncer at session pool mode |
-| **Redis pub/sub** | 1 sub per SSE client | Fan-out O(n) | Shared subscription per hiveshare per instance |
-| **Embedding** | Sync, 1 at a time | Blocks request goroutine | Async worker pool with queue depth |
-| **ivfflat search** | probes=1, ~1% recall | Bad results | Set probes=10 or migrate to HNSW |
-| **Auth middleware** | DB round-trip per req | Adds 1–5ms per request | In-memory LRU cache with 60s TTL |
-| **usage_events** | Full scans, no partition | Degrades over months | Monthly partition + 90d rolling delete |
+| **API server** | 1 instance | SPOF | LB + 2+ replicas (V2) |
+| **PostgreSQL pool** | MaxConns=20 | App-side only | PgBouncer |
+| **Redis pub/sub** | 1 sub / hiveshare / instance | Multi-replica broadcast + no persistence | Redis Streams (V3) |
+| **Embedding** | Async pool | Search still embeds query sync | Cache query embeddings / separate tier |
+| **HNSW search** | In place | Raise `hnsw.ef_search` if top-k > 40 | Confirm `maintenance_work_mem` on build |
+| **Auth middleware** | DB round-trip per req | 1–5ms/req | In-memory LRU 60s TTL |
+| **usage_events** | 90d TTL + indexes | Large analytical scans | Monthly partitioning (V3) |
 
 ---
 
@@ -201,20 +141,20 @@ C4Context
     Person(tm, "Teammate", "Uses Claude Code or hshare CLI")
 
     System_Boundary(server, "Single Server (docker-compose)") {
-        System(api, "hiveshare-server", "Go binary: REST API + SSE hub")
-        SystemDb(pg, "PostgreSQL + pgvector", "Users, hiveshares, memory, events")
-        SystemDb(redis, "Redis", "Pub/sub for SSE fan-out")
+        System(api, "hiveshare-server", "Go: REST + SSE + embed workers + health")
+        SystemDb(pg, "PostgreSQL + pgvector HNSW", "Users, hiveshares, memory, events")
+        SystemDb(redis, "Redis", "SSE pub/sub + view counters")
     }
 
-    System_Ext(openai, "OpenAI API", "Embedding generation")
+    System_Ext(openai, "OpenAI API", "Embedding generation (async on write)")
     System_Ext(ollama, "Ollama (optional)", "Local embedding model")
 
     Rel(dev, api, "REST + SSE", "HTTPS")
     Rel(tm, api, "REST + SSE", "HTTPS")
-    Rel(api, pg, "pgx/v5 pool")
-    Rel(api, redis, "PUBLISH / SUBSCRIBE")
-    Rel(api, openai, "HTTP (sync)", "text-embedding-3-small")
-    Rel(api, ollama, "HTTP (sync)", "nomic-embed-text")
+    Rel(api, pg, "pgx/v5 pool (capped)")
+    Rel(api, redis, "PUBLISH / shared SUBSCRIBE / INCR")
+    Rel(api, openai, "HTTP (async workers)", "text-embedding-3-small")
+    Rel(api, ollama, "HTTP (async workers)", "nomic-embed-text")
 ```
 
 ### 4.2 Data flow — adding a memory entry
@@ -224,6 +164,7 @@ sequenceDiagram
     participant Claude as Claude Code (MCP)
     participant MCP as hiveshare-mcp
     participant API as hiveshare-server
+    participant Worker as Embed Worker
     participant Embed as Embedding API
     participant PG as PostgreSQL
     participant Redis as Redis
@@ -231,17 +172,17 @@ sequenceDiagram
 
     Claude->>MCP: add_memory {content, source_ref, tool}
     MCP->>API: POST /api/v1/hiveshares/:id/memory
-    API->>API: Auth check (DB lookup — P2.9: cache this)
-    API->>Embed: Embed(content) ← P1 blocking call
-    Embed-->>API: vector[1536] (100-500ms)
-    API->>PG: INSERT memory_entries (content + vector)
+    API->>API: Auth (SHA-256 key lookup)
+    API->>PG: INSERT memory_entries (embedding NULL)
     PG-->>API: entry_id
+    API->>Worker: Enqueue(entry_id, content)
     API->>PG: INSERT usage_events {event='add'}
-    API->>Redis: PUBLISH hiveshare:<id>:events {payload}
-    Redis-->>Tm: fan-out to SSE subscribers
-    Tm-->>Tm: [stream] "+ memory added: jira/PROJ-123 by Alice"
-    API-->>MCP: 201 {entry_id, summary}
-    MCP-->>Claude: tool result
+    API->>Redis: PUBLISH hiveshare:<id>:events
+    Redis-->>Tm: shared sub → local fan-out
+    API-->>MCP: 201 {entry}
+    Worker->>Embed: Embed(content)
+    Embed-->>Worker: vector
+    Worker->>PG: UPDATE embedding
 ```
 
 ### 4.3 Data flow — searching memory
@@ -260,35 +201,27 @@ sequenceDiagram
     alt embedding available
         Embed-->>API: vector[1536]
         API->>PG: SELECT … ORDER BY embedding <=> $2 LIMIT 10
-        note over PG: ivfflat cosine scan (probes=1 currently ⚠)
-    else embedding failed / no provider
+        note over PG: HNSW cosine scan
+    else embedding failed / no provider / NULL vectors
         API->>PG: plainto_tsquery full-text search
     end
-    PG-->>API: ranked results
+    PG-->>API: ranked results (full content)
     API->>PG: INSERT usage_events {event='search'}
     API-->>MCP: {results, count, query}
-    MCP-->>Claude: formatted context
 ```
 
-### 4.4 SSE connection lifecycle (current vs fixed)
+### 4.4 SSE connection lifecycle
 
 ```mermaid
 graph TB
-    subgraph Current["Current (problem)"]
-        C1["Client A"] -->|rdb.Subscribe| R1["Redis channel hiveshare:X"]
-        C2["Client B"] -->|rdb.Subscribe| R1
-        C3["Client C"] -->|rdb.Subscribe| R1
-        note1["3 Redis subscriptions\nto same channel ⚠"]
-    end
-
-    subgraph Fixed["Fixed (shared subscription)"]
-        F1["Client A"] --> LCh1["local chan"]
-        F2["Client B"] --> LCh2["local chan"]
-        F3["Client C"] --> LCh3["local chan"]
-        LCh1 & LCh2 & LCh3 --> Fan["Fan-out goroutine\n(per hiveshare)"]
-        Fan -->|1 subscription| R2["Redis channel hiveshare:X"]
-    end
+    F1["Client A"] --> LCh1["local chan"]
+    F2["Client B"] --> LCh2["local chan"]
+    F3["Client C"] --> LCh3["local chan"]
+    LCh1 & LCh2 & LCh3 --> Fan["Hub fan-out\n(per hiveshare)"]
+    Fan -->|1 subscription| R2["Redis channel hiveshare:X"]
 ```
+
+First local SSE client for a hiveshare starts the Redis subscription; last client tears it down.
 
 ---
 
@@ -305,10 +238,6 @@ graph TB
         S2["hiveshare-server :8081"]
     end
 
-    subgraph Workers["Async Workers"]
-        EW["Embed Worker Pool\n(N goroutines)"]
-    end
-
     subgraph Storage["Storage"]
         PGB["PgBouncer\nconnection pooler"]
         PG[("PostgreSQL\nprimary")]
@@ -320,18 +249,16 @@ graph TB
     S1 & S2 -->|"auth cache\n(LRU 60s)"| Redis
     S1 & S2 -->|"writes"| PGB --> PG
     S1 & S2 -->|"metrics reads"| PGR
-    S1 & S2 -->|"embed jobs"| EW
-    EW -->|"UPDATE embedding"| PGB
     S1 & S2 -->|"1 sub/hiveshare/instance"| Redis
 ```
 
 ### V2 changes from current
-1. **PgBouncer** in transaction-pool mode: allows 20 server connections to serve 200 app connections
-2. **Async embedding**: worker pool decouples embed latency from HTTP response
-3. **Shared Redis subscription** per hiveshare per instance (fixes P0.2.1)
-4. **Auth LRU cache** in-process: eliminates DB round-trip per request (50k RPS tested with Redis-backed cache)
+1. **PgBouncer** in transaction-pool mode: allows capped server connections to serve many app connections
+2. ~~**Async embedding**~~ — done in-process; V2 may extract a separate worker process
+3. ~~**Shared Redis subscription**~~ — done
+4. **Auth LRU cache** in-process: eliminates DB round-trip per request
 5. **Read replica** for metrics queries: unloads analytical aggregations from primary
-6. **Caddy** handles TLS automatically (Let's Encrypt), rate limiting, and load balancing
+6. **Caddy** handles TLS (Let's Encrypt) and load balancing (app already rate-limits)
 
 ---
 
@@ -393,10 +320,10 @@ graph TB
 ### Key V3 additions
 - **Redis Streams** instead of pub/sub: persisted events, consumer groups, replay on reconnect
 - **NATS JetStream**: durable embed job queue with exactly-once delivery
-- **Separate embed worker** tier: scale embedding independently of API (GPU workers for local models)
+- **Separate embed worker** tier: scale embedding independently of API
 - **Redis Cluster**: eliminates single-node Redis as SPOF
 - **Prometheus + Grafana**: metrics per hiveshare, search latency percentiles, embed queue depth
-- **PostgreSQL partitioning**: `usage_events` partitioned by month
+- **PostgreSQL partitioning**: `usage_events` partitioned by month (TTL job already runs)
 
 ---
 
@@ -430,7 +357,7 @@ BQ in pgvector 0.7.0 with 64 parallel workers yields ~150x build speedup and 16x
 1. **Broadcast fan-out** — every gateway pod receives every published message regardless of which users are connected to it, generating unnecessary inter-pod traffic that grows linearly with replica count.
 2. **Zero persistence** — any message published when no subscriber is connected is permanently lost with no replay mechanism, making it unsuitable as the sole transport where reliability matters.
 
-**Implication for HiveShare:** The current single-instance deployment masks problem #2. When you run two server replicas (V2), problem #1 appears — each replica's SSE hub subscribes to every hiveshare channel, receiving messages for users it isn't serving. Redis Streams with consumer groups solves both: durable delivery with per-consumer ACK, targeted group routing. This is the correct V2 → V3 upgrade path for the SSE layer.
+**Implication for HiveShare:** Shared subscription per hiveshare (done) fixes single-instance waste. When you run two server replicas (V2), problem #1 still appears across replicas. Redis Streams with consumer groups is the V2 → V3 upgrade path for the SSE layer.
 
 ### What the research could NOT verify
 
@@ -442,34 +369,34 @@ The following topics produced zero surviving verified claims — all specific nu
 
 ---
 
-## 7. Prioritised fix roadmap
+## 7. Prioritised roadmap
 
-### Week 1 (before team use)
+### Done (team-ready baseline)
+
+| # | Fix | Status |
+|---|---|---|
+| F1 | Replace ivfflat with HNSW | Done |
+| F3 | Explicit pgxpool config | Done |
+| F4 | Hash API keys (SHA-256) | Done |
+| F5 | `GET /health` | Done |
+| F6 | RequestSize + Timeout | Done |
+| F7 | Invite expiry in SQL | Done |
+| F7b | Shared Redis subscription per hiveshare | Done |
+| F8 | Async embedding worker pool | Done |
+| F9 | Exclude `content` from List | Done |
+| F11 | `usage_events` 90-day rolling delete | Done |
+| F11b | Redis-backed views counter | Done |
+| F17a | Structured slog logging | Done |
+| F17b | Rate limit 60/min per key | Done |
+
+### Next (before wider / multi-replica)
+
 | # | Fix | Effort | Impact |
 |---|---|---|---|
-| F1 | **Replace ivfflat with HNSW** (research confirms 433x vs seq scan, 30x vs ivfflat at high recall) | 30 min | Search quality — P0 |
-| F2 | Set `maintenance_work_mem = '512MB'` for HNSW builds; set `hnsw.ef_search = 40` (already default, but confirm) | 15 min | Build speed + recall |
-| F3 | Explicit pgxpool config (MaxConns=20, MinConns=4) | 15 min | Stability |
-| F4 | Hash API keys (SHA-256 at rest) | 1 hr | Security |
-| F5 | Add `GET /health` endpoint | 30 min | Ops visibility |
-| F6 | Middleware: RequestSize + Timeout | 30 min | Hardening |
-| F7 | Fix invite expiry check in SQL | 15 min | Correctness |
-
-### Week 2 (before wider team)
-| # | Fix | Effort | Impact |
-|---|---|---|---|
-| F7 | Shared Redis subscription per hiveshare | 2 hrs | SSE scale |
-| F8 | Async embedding worker pool (5 goroutines) | 3 hrs | Throughput |
-| F9 | Exclude `content` from List query | 1 hr | Payload size |
+| F2 | Set `maintenance_work_mem` for HNSW builds; confirm `hnsw.ef_search` for large top-k | 15 min | Build speed + recall |
 | F10 | Auth LRU cache (256 entries, 60s TTL) | 2 hrs | Latency |
-| F11 | `usage_events` 90-day rolling delete job | 1 hr | DB growth |
-
-### Month 2 (scaling beyond 5 teams)
-| # | Fix | Effort | Impact |
-|---|---|---|---|
 | F13 | PgBouncer in front of PostgreSQL | 4 hrs | Connection headroom |
 | F14 | Postgres read replica for metrics | 1 day | Primary offload |
-| F15 | **Redis Streams for SSE** — replaces pub/sub; at-least-once delivery, replay on reconnect, no message loss when pod restarts (confirmed by research: pub/sub has zero persistence) | 1 day | Reliability |
+| F15 | Redis Streams for SSE | 1 day | Multi-replica reliability |
 | F16 | `usage_events` monthly partitioning | 2 hrs | Query performance |
-| F17 | Structured slog logging + request tracing | 3 hrs | Observability |
-| F18 | Test binary quantization on your embedding corpus **before** enabling — research confirmed 0% recall on some datasets | spike | Storage savings (risky) |
+| F18 | Test binary quantization on your corpus before enabling | spike | Storage (risky) |
