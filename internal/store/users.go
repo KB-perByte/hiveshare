@@ -85,3 +85,8 @@ func hashAPIKey(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:])
 }
+
+// HashAPIKey returns the SHA-256 hex digest used for storage and cache keys.
+func HashAPIKey(key string) string {
+	return hashAPIKey(key)
+}
