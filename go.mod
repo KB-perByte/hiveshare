@@ -1,4 +1,4 @@
-module github.com/sagpaul/hiveshare
+module github.com/KB-perByte/hiveshare
 
 go 1.22
 

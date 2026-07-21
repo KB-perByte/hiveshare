@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sagpaul/hiveshare/internal/models"
-	"github.com/sagpaul/hiveshare/internal/store"
+	"github.com/KB-perByte/hiveshare/internal/models"
+	"github.com/KB-perByte/hiveshare/internal/store"
 )
 
 type contextKey string

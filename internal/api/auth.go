@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/sagpaul/hiveshare/internal/store"
+	"github.com/KB-perByte/hiveshare/internal/store"
 )
 
 type AuthHandler struct {

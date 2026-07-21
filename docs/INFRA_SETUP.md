@@ -555,7 +555,7 @@ Add to `~/.claude/claude_desktop_config.json` (or project `.mcp.json`):
 {
   "mcpServers": {
     "hiveshare": {
-      "command": "/home/YOUR_USER/.local/bin/hiveshare-mcp",
+      "command": "~/.local/bin/hiveshare-mcp",
       "env": {
         "HIVESHARE_API_KEY": "hvs_your_key",
         "HIVESHARE_SERVER_URL": "https://YOUR_SERVER_URL",

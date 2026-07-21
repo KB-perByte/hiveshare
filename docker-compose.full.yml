@@ -37,7 +37,7 @@ services:
     restart: unless-stopped
 
   hiveshare:
-    image: ${HIVESHARE_IMAGE:-ghcr.io/YOUR_GITHUB_USER/hiveshare:latest}
+    image: ${HIVESHARE_IMAGE:-ghcr.io/KB-perByte/hiveshare:latest}
     depends_on:
       postgres:
         condition: service_healthy

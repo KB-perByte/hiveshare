@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	mcpsrv "github.com/sagpaul/hiveshare/internal/mcp"
+	mcpsrv "github.com/KB-perByte/hiveshare/internal/mcp"
 )
 
 type Config struct {

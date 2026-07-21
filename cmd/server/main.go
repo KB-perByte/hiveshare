@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/sagpaul/hiveshare/internal/api"
-	"github.com/sagpaul/hiveshare/internal/embed"
-	"github.com/sagpaul/hiveshare/internal/realtime"
-	"github.com/sagpaul/hiveshare/internal/store"
+	"github.com/KB-perByte/hiveshare/internal/api"
+	"github.com/KB-perByte/hiveshare/internal/embed"
+	"github.com/KB-perByte/hiveshare/internal/realtime"
+	"github.com/KB-perByte/hiveshare/internal/store"
 )
 
 func main() {

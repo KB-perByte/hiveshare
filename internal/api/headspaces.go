@@ -11,8 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/sagpaul/hiveshare/internal/models"
-	"github.com/sagpaul/hiveshare/internal/store"
+	"github.com/KB-perByte/hiveshare/internal/models"
+	"github.com/KB-perByte/hiveshare/internal/store"
 )
 
 type HiveshareHandler struct {

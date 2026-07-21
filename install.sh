@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # HiveShare CLI + MCP installer
-# Usage: curl -sSL https://raw.githubusercontent.com/YOUR_USER/hiveshare/main/install.sh | bash
+# Usage: curl -sSL https://raw.githubusercontent.com/KB-perByte/hiveshare/main/install.sh | bash
 set -euo pipefail
 
-REPO="YOUR_GITHUB_USER/hiveshare"
+REPO="KB-perByte/hiveshare"
 INSTALL_DIR="${HIVESHARE_INSTALL_DIR:-$HOME/.local/bin}"
 GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
 

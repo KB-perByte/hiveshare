@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-	"github.com/sagpaul/hiveshare/internal/models"
+	"github.com/KB-perByte/hiveshare/internal/models"
 )
 
 const channelPrefix = "hiveshare:"

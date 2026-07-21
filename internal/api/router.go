@@ -6,9 +6,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/sagpaul/hiveshare/internal/embed"
-	"github.com/sagpaul/hiveshare/internal/realtime"
-	"github.com/sagpaul/hiveshare/internal/store"
+	"github.com/KB-perByte/hiveshare/internal/embed"
+	"github.com/KB-perByte/hiveshare/internal/realtime"
+	"github.com/KB-perByte/hiveshare/internal/store"
 )
 
 // userStoreKey is used to pass the user store through context for invite acceptance.

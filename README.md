@@ -28,8 +28,8 @@ Bob opens PROJ-42 with Cursor       →  MCP tool loads Alice's memory automatic
 ### 1 — Start the server (Docker)
 
 ```bash
-curl -O https://raw.githubusercontent.com/YOUR_USER/hiveshare/main/docker-compose.full.yml
-curl -O https://raw.githubusercontent.com/YOUR_USER/hiveshare/main/.env.example
+curl -O https://raw.githubusercontent.com/KB-perByte/hiveshare/main/docker-compose.full.yml
+curl -O https://raw.githubusercontent.com/KB-perByte/hiveshare/main/.env.example
 cp .env.example .env
 # Edit .env: set a strong POSTGRES_PASSWORD and your BASE_URL
 nano .env
@@ -42,13 +42,13 @@ The server is now running at `http://localhost:8080` (or your `BASE_URL`).
 ### 2 — Install the CLI
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/YOUR_USER/hiveshare/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/KB-perByte/hiveshare/main/install.sh | bash
 ```
 
 Or with Go installed:
 
 ```bash
-go install github.com/YOUR_USER/hiveshare/cmd/hshare@latest
+go install github.com/KB-perByte/hiveshare/cmd/hshare@latest
 ```
 
 ### 3 — Register and create a hiveshare
@@ -76,7 +76,7 @@ Bob opens the link (or POSTs to it), gets his API key, and runs step 2–3 with 
 
 Install the MCP binary:
 ```bash
-go install github.com/YOUR_USER/hiveshare/cmd/hiveshare-mcp@latest
+go install github.com/KB-perByte/hiveshare/cmd/hiveshare-mcp@latest
 # or: the install.sh above already placed it in ~/.local/bin/
 ```
 
@@ -198,7 +198,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a deep review, scale anal
 Requires Go 1.22+.
 
 ```bash
-git clone https://github.com/YOUR_USER/hiveshare
+git clone https://github.com/KB-perByte/hiveshare
 cd hiveshare
 make deps build
 

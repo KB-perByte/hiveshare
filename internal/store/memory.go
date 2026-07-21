@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
-	"github.com/sagpaul/hiveshare/internal/models"
+	"github.com/KB-perByte/hiveshare/internal/models"
 )
 
 type MemoryStore struct {
