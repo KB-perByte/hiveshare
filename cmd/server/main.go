@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,13 +17,16 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// database
 	pool, err := store.NewPool(ctx)
 	if err != nil {
-		log.Fatalf("db: %v", err)
+		slog.Error("db", "err", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -34,12 +37,14 @@ func main() {
 	}
 	opt, err := redis.ParseURL(redisAddr)
 	if err != nil {
-		log.Fatalf("redis url: %v", err)
+		slog.Error("redis url", "err", err)
+		os.Exit(1)
 	}
 	rdb := redis.NewClient(opt)
 	defer rdb.Close()
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatalf("redis ping: %v", err)
+		slog.Error("redis ping", "err", err)
+		os.Exit(1)
 	}
 
 	// layers
@@ -49,8 +54,16 @@ func main() {
 	metricsStore := store.NewMetricsStore(pool)
 	embedder := embed.New()
 	hub := realtime.NewHub(rdb)
+	views := store.NewViewCounter(rdb, pool)
+	views.StartFlusher(ctx, 60*time.Second)
 
-	router := api.NewRouter(userStore, hsStore, memStore, metricsStore, embedder, hub)
+	worker := embed.NewWorker(embedder, memStore, 2, 64)
+	worker.Start(ctx, 2)
+
+	// rolling TTL for usage_events (retain 90 days)
+	go purgeUsageEvents(ctx, metricsStore)
+
+	router := api.NewRouter(userStore, hsStore, memStore, metricsStore, embedder, hub, worker, views, pool, rdb)
 
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
@@ -63,16 +76,41 @@ func main() {
 		WriteTimeout: 60 * time.Second,
 	}
 
-	log.Printf("hiveshare server listening on %s", addr)
+	slog.Info("hiveshare server listening", "addr", addr)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %v", err)
+			slog.Error("listen", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("shutting down...")
+	slog.Info("shutting down")
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	srv.Shutdown(shutCtx)
+	_ = srv.Shutdown(shutCtx)
+}
+
+func purgeUsageEvents(ctx context.Context, metrics *store.MetricsStore) {
+	run := func() {
+		n, err := metrics.PurgeOldUsageEvents(ctx, 90*24*time.Hour)
+		if err != nil {
+			slog.Warn("usage_events purge failed", "err", err)
+			return
+		}
+		if n > 0 {
+			slog.Info("usage_events purged", "rows", n)
+		}
+	}
+	run()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
 }

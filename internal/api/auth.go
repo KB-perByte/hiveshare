@@ -33,6 +33,5 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) Whoami(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	u.APIKey = "" // don't echo the key back on whoami
 	writeJSON(w, http.StatusOK, u)
 }

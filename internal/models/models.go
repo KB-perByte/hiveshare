@@ -60,15 +60,15 @@ type MemoryEntry struct {
 	SourceType  string                 `json:"source_type"`
 	SourceRef   string                 `json:"source_ref"`
 	SourceURL   string                 `json:"source_url,omitempty"`
-	Tool        string                 `json:"tool"`
-	Content     string                 `json:"content"`
+	Tool        string                 `json:"tool,omitempty"`
+	Content     string                 `json:"content,omitempty"`
 	Summary     string                 `json:"summary,omitempty"`
 	Tags        []string               `json:"tags"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 	Views       int                    `json:"views"`
 	Reuses      int                    `json:"reuses"`
 	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
+	UpdatedAt   time.Time              `json:"updated_at,omitempty"`
 	// search result field
 	Score float64 `json:"score,omitempty"`
 }

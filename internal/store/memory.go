@@ -48,6 +48,14 @@ func (s *MemoryStore) Create(ctx context.Context, e *models.MemoryEntry, embeddi
 	return e, nil
 }
 
+func (s *MemoryStore) UpdateEmbedding(ctx context.Context, id uuid.UUID, embedding []float32) error {
+	_, err := s.db.Exec(ctx,
+		`UPDATE memory_entries SET embedding = $2, updated_at = NOW() WHERE id = $1`,
+		id, pgvector.NewVector(embedding),
+	)
+	return err
+}
+
 func (s *MemoryStore) List(ctx context.Context, hiveshareID uuid.UUID, f ListMemoryFilter) ([]*models.MemoryEntry, error) {
 	if f.Limit == 0 {
 		f.Limit = 50
@@ -78,9 +86,10 @@ func (s *MemoryStore) List(ctx context.Context, hiveshareID uuid.UUID, f ListMem
 	}
 
 	args = append(args, f.Limit, f.Offset)
+	// List omits full content to keep payloads small (content only in Get/Search).
 	q := fmt.Sprintf(
-		`SELECT me.id, me.hiveshare_id, me.user_id, u.name, me.source_type, me.source_ref, me.source_url,
-		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at
+		`SELECT me.id, me.hiveshare_id, me.user_id, u.name, me.source_type, me.source_ref,
+		        me.summary, me.tags, me.views, me.reuses, me.created_at
 		 FROM memory_entries me
 		 JOIN users u ON u.id = me.user_id
 		 WHERE %s
@@ -88,7 +97,7 @@ func (s *MemoryStore) List(ctx context.Context, hiveshareID uuid.UUID, f ListMem
 		 LIMIT $%d OFFSET $%d`,
 		strings.Join(wheres, " AND "), n, n+1,
 	)
-	return s.scanRows(ctx, q, args...)
+	return s.scanListRows(ctx, q, args...)
 }
 
 func (s *MemoryStore) Get(ctx context.Context, id, hiveshareID uuid.UUID) (*models.MemoryEntry, error) {
@@ -102,16 +111,13 @@ func (s *MemoryStore) Get(ctx context.Context, id, hiveshareID uuid.UUID) (*mode
 	if err != nil || len(rows) == 0 {
 		return nil, fmt.Errorf("get memory entry: %w", err)
 	}
-	_ = s.db.QueryRow(ctx,
-		`UPDATE memory_entries SET views = views + 1 WHERE id = $1`, id,
-	)
 	return rows[0], nil
 }
 
 func (s *MemoryStore) Update(ctx context.Context, id, hiveshareID uuid.UUID, content, summary string, tags []string) (*models.MemoryEntry, error) {
 	var e models.MemoryEntry
 	err := s.db.QueryRow(ctx,
-		`UPDATE memory_entries SET content = $3, summary = $4, tags = $5, updated_at = NOW()
+		`UPDATE memory_entries SET content = $3, summary = $4, tags = $5, embedding = NULL, updated_at = NOW()
 		 WHERE id = $1 AND hiveshare_id = $2
 		 RETURNING id, hiveshare_id, user_id, source_type, source_ref, source_url, tool,
 		           content, summary, tags, metadata, views, reuses, created_at, updated_at`,
@@ -197,6 +203,25 @@ func (s *MemoryStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID,
 func (s *MemoryStore) IncrementReuse(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.Exec(ctx, `UPDATE memory_entries SET reuses = reuses + 1 WHERE id = $1`, id)
 	return err
+}
+
+func (s *MemoryStore) scanListRows(ctx context.Context, q string, args ...interface{}) ([]*models.MemoryEntry, error) {
+	rows, err := s.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []*models.MemoryEntry
+	for rows.Next() {
+		var e models.MemoryEntry
+		if err := rows.Scan(&e.ID, &e.HiveshareID, &e.UserID, &e.UserName,
+			&e.SourceType, &e.SourceRef, &e.Summary, &e.Tags, &e.Views, &e.Reuses, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, &e)
+	}
+	return result, rows.Err()
 }
 
 func (s *MemoryStore) scanRows(ctx context.Context, q string, args ...interface{}) ([]*models.MemoryEntry, error) {

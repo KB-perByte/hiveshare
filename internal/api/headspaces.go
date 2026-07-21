@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/KB-perByte/hiveshare/internal/models"
 	"github.com/KB-perByte/hiveshare/internal/store"
@@ -192,7 +191,11 @@ func (h *HiveshareHandler) AcceptInvite(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// find or create user
-	us := r.Context().Value("userStore").(*store.UserStore)
+	us, _ := r.Context().Value(userStoreKey{}).(*store.UserStore)
+	if us == nil {
+		writeError(w, http.StatusInternalServerError, "user store unavailable")
+		return
+	}
 	user, err := us.GetByEmail(r.Context(), inv.Email)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) && !isNotFound(err) {
@@ -219,7 +222,7 @@ func (h *HiveshareHandler) AcceptInvite(w http.ResponseWriter, r *http.Request) 
 	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message":      "Welcome to " + inv.HeadspaceName,
+		"message":      "Welcome to " + inv.HiveShareName,
 		"hiveshare_id": inv.HiveshareID,
 		"user":         user,
 	})

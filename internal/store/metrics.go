@@ -151,13 +151,13 @@ func (s *MetricsStore) UserMetrics(ctx context.Context, userID uuid.UUID) (*mode
 
 	if err := s.db.QueryRow(ctx,
 		`SELECT COUNT(*) FROM hiveshares WHERE owner_id = $1`, userID,
-	).Scan(&m.HeadspacesOwned); err != nil {
+	).Scan(&m.HivsharesOwned); err != nil {
 		return nil, err
 	}
 
 	if err := s.db.QueryRow(ctx,
 		`SELECT COUNT(*) FROM hiveshare_members WHERE user_id = $1`, userID,
-	).Scan(&m.HeadspacesJoined); err != nil {
+	).Scan(&m.HivsharesJoined); err != nil {
 		return nil, err
 	}
 
@@ -168,4 +168,14 @@ func (s *MetricsStore) UserMetrics(ctx context.Context, userID uuid.UUID) (*mode
 	}
 
 	return m, nil
+}
+
+// PurgeOldUsageEvents deletes usage_events older than retention (rolling TTL).
+func (s *MetricsStore) PurgeOldUsageEvents(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-olderThan)
+	tag, err := s.db.Exec(ctx, `DELETE FROM usage_events WHERE created_at < $1`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }

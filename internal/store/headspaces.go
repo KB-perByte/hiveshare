@@ -185,9 +185,9 @@ func (s *HiveshareStore) GetInvitation(ctx context.Context, token string) (*mode
 		        h.name
 		 FROM invitations i
 		 JOIN hiveshares h ON h.id = i.hiveshare_id
-		 WHERE i.token = $1`, token,
+		 WHERE i.token = $1 AND i.status = 'pending' AND i.expires_at > NOW()`, token,
 	).Scan(&inv.ID, &inv.HiveshareID, &inv.Email, &inv.InvitedBy, &inv.Token,
-		&inv.Role, &inv.Status, &inv.CreatedAt, &inv.ExpiresAt, &inv.HeadspaceName)
+		&inv.Role, &inv.Status, &inv.CreatedAt, &inv.ExpiresAt, &inv.HiveShareName)
 	if err != nil {
 		return nil, fmt.Errorf("get invitation: %w", err)
 	}

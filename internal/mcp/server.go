@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 )
 
 const serverVersion = "0.1.0"
@@ -41,13 +41,13 @@ func (s *Server) Run(ctx context.Context) error {
 			if err == io.EOF {
 				return nil
 			}
-			log.Printf("mcp: read error: %v", err)
+			slog.Error("mcp: read error", "err", err)
 			continue
 		}
 
 		resp := s.handle(ctx, req)
 		if err := WriteResponse(s.writer, resp); err != nil {
-			log.Printf("mcp: write error: %v", err)
+			slog.Error("mcp: write error", "err", err)
 			return err
 		}
 	}

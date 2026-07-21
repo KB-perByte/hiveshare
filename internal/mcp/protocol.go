@@ -28,6 +28,17 @@ type RPCError struct {
 	Message string `json:"message"`
 }
 
+func (e *RPCError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+func Errorf(code int, format string, args ...interface{}) *RPCError {
+	return &RPCError{Code: code, Message: fmt.Sprintf(format, args...)}
+}
+
 type Notification struct {
 	JSONRPC string      `json:"jsonrpc"`
 	Method  string      `json:"method"`
@@ -80,8 +91,4 @@ func ReadRequest(r *bufio.Reader) (*Request, error) {
 		return nil, err
 	}
 	return &req, nil
-}
-
-func Errorf(code int, msg string, args ...interface{}) *RPCError {
-	return &RPCError{Code: code, Message: fmt.Sprintf(msg, args...)}
 }

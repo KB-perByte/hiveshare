@@ -12,15 +12,28 @@ import (
 )
 
 type MemoryHandler struct {
-	mem     *store.MemoryStore
-	hs      *store.HiveshareStore
-	metrics *store.MetricsStore
+	mem      *store.MemoryStore
+	hs       *store.HiveshareStore
+	metrics  *store.MetricsStore
 	embedder embed.Embedder
-	hub     *realtime.Hub
+	hub      *realtime.Hub
+	worker   *embed.Worker
+	views    *store.ViewCounter
 }
 
-func NewMemoryHandler(mem *store.MemoryStore, hs *store.HiveshareStore, metrics *store.MetricsStore, embedder embed.Embedder, hub *realtime.Hub) *MemoryHandler {
-	return &MemoryHandler{mem: mem, hs: hs, metrics: metrics, embedder: embedder, hub: hub}
+func NewMemoryHandler(
+	mem *store.MemoryStore,
+	hs *store.HiveshareStore,
+	metrics *store.MetricsStore,
+	embedder embed.Embedder,
+	hub *realtime.Hub,
+	worker *embed.Worker,
+	views *store.ViewCounter,
+) *MemoryHandler {
+	return &MemoryHandler{
+		mem: mem, hs: hs, metrics: metrics, embedder: embedder,
+		hub: hub, worker: worker, views: views,
+	}
 }
 
 func (h *MemoryHandler) requireAccess(r *http.Request, w http.ResponseWriter, minRole string) (uuid.UUID, bool) {
@@ -105,12 +118,6 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Metadata = map[string]interface{}{}
 	}
 
-	// generate embedding
-	var embedding []float32
-	if vec, err := h.embedder.Embed(r.Context(), req.Content); err == nil {
-		embedding = vec
-	}
-
 	entry := &models.MemoryEntry{
 		HiveshareID: hsID,
 		UserID:      u.ID,
@@ -124,12 +131,15 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Metadata:    req.Metadata,
 	}
 
-	created, err := h.mem.Create(r.Context(), entry, embedding)
+	// Store immediately with embedding = NULL; embed async so HTTP isn't blocked.
+	created, err := h.mem.Create(r.Context(), entry, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	created.UserName = u.Name
+
+	h.worker.Enqueue(embed.Job{EntryID: created.ID, Content: req.Content})
 
 	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
 		UserID:      u.ID,
@@ -164,6 +174,14 @@ func (h *MemoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "entry not found")
 		return
 	}
+
+	if pending, err := h.views.Increment(r.Context(), entryID); err == nil {
+		// DB views are the flushed base; Redis holds the unflushed delta (incl. this view).
+		entry.Views += int(pending)
+	} else {
+		entry.Views++ // best-effort local bump if Redis is down
+	}
+
 	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
 		UserID:      u.ID,
 		HiveshareID: &hsID,
@@ -193,6 +211,9 @@ func (h *MemoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if req.Content != "" {
+		h.worker.Enqueue(embed.Job{EntryID: entry.ID, Content: req.Content})
 	}
 	_ = h.hub.Publish(r.Context(), models.StreamEvent{
 		Type:        "memory_updated",

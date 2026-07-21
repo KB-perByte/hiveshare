@@ -1,7 +1,6 @@
--- vector similarity index (created after data is loaded for better quality)
+-- vector similarity index (HNSW: no probe tuning, better recall than ivfflat)
 CREATE INDEX IF NOT EXISTS memory_entries_embedding_idx
-    ON memory_entries USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
+    ON memory_entries USING hnsw (embedding vector_cosine_ops);
 
 -- source lookup index
 CREATE INDEX IF NOT EXISTS memory_entries_source_idx
@@ -28,3 +27,7 @@ CREATE INDEX IF NOT EXISTS usage_events_hiveshare_time_idx
     ON usage_events (hiveshare_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS usage_events_user_time_idx
     ON usage_events (user_id, created_at DESC);
+
+-- supports rolling TTL deletes on usage_events
+CREATE INDEX IF NOT EXISTS usage_events_created_at_idx
+    ON usage_events (created_at);
