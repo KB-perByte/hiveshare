@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Build & publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      # ── Build cross-platform binaries ───────────────────────────────────────
+      - name: Build binaries
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+
+          for GOOS in linux darwin; do
+            for GOARCH in amd64 arm64; do
+              PLATFORM="${GOOS}_${GOARCH}"
+              OUT="dist/${PLATFORM}"
+              mkdir -p "$OUT"
+
+              GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="$LDFLAGS" \
+                -o "${OUT}/hiveshare-server" ./cmd/server
+              GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="$LDFLAGS" \
+                -o "${OUT}/hiveshare-mcp" ./cmd/mcp
+              GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="$LDFLAGS" \
+                -o "${OUT}/hshare" ./cmd/hshare
+
+              tar -czf "dist/hiveshare_${PLATFORM}.tar.gz" -C "$OUT" .
+              echo "Built dist/hiveshare_${PLATFORM}.tar.gz"
+            done
+          done
+
+      # ── Build & push Docker image ───────────────────────────────────────────
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hiveshare:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/hiveshare:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Create GitHub Release ───────────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            **CLI + MCP (Linux / macOS):**
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+            ```
+
+            **Docker (full stack):**
+            ```bash
+            curl -O https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.full.yml
+            curl -O https://raw.githubusercontent.com/${{ github.repository }}/main/.env.example
+            cp .env.example .env  # edit BASE_URL and passwords
+            docker compose -f docker-compose.full.yml up -d
+            ```
+
+            **`go install` (requires Go 1.22+):**
+            ```bash
+            go install github.com/${{ github.repository }}/cmd/hshare@${{ github.ref_name }}
+            go install github.com/${{ github.repository }}/cmd/mcp@${{ github.ref_name }}
+            ```

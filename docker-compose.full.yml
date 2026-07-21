@@ -1,0 +1,64 @@
+version: "3.9"
+
+# Full-stack compose: postgres + redis + hiveshare-server
+# Usage: docker compose -f docker-compose.full.yml up -d
+#
+# Set secrets in a .env file (copy from .env.example):
+#   cp .env.example .env && nano .env
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hiveshare}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-hiveshare}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d   # auto-runs on first start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hiveshare}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  hiveshare:
+    image: ${HIVESHARE_IMAGE:-ghcr.io/YOUR_GITHUB_USER/hiveshare:latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-hiveshare}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-hiveshare}?sslmode=disable"
+      REDIS_URL: "redis://redis:6379"
+      LISTEN_ADDR: ":8080"
+      BASE_URL: "${BASE_URL:-http://localhost:8080}"
+      EMBED_PROVIDER: "${EMBED_PROVIDER:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

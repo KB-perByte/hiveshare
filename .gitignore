@@ -1,0 +1,36 @@
+# Binaries
+bin/
+*.exe
+*.out
+
+# Go
+vendor/
+*.test
+*.prof
+coverage.out
+
+# Environment / secrets
+.env
+.env.*
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (if mounted locally)
+postgres_data/
+redis_data/
+
+# Build artifacts
+dist/
+release/
+
+# Fly.io (if ever used)
+fly.toml

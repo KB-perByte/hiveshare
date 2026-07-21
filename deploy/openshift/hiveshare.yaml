@@ -1,0 +1,90 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hiveshare
+  namespace: hiveshare
+  labels:
+    app: hiveshare
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hiveshare
+  template:
+    metadata:
+      labels:
+        app: hiveshare
+    spec:
+      initContainers:
+      # Runs migrations before the server starts
+      - name: migrate
+        image: YOUR_REGISTRY/hiveshare:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          apk add --no-cache postgresql-client
+          until pg_isready -h postgres -U hiveshare; do sleep 2; done
+          psql "$DATABASE_URL" -f /app/migrations/001_init.sql || true
+          psql "$DATABASE_URL" -f /app/migrations/002_indexes.sql || true
+        envFrom:
+        - secretRef:
+            name: hiveshare-env
+      containers:
+      - name: hiveshare
+        image: YOUR_REGISTRY/hiveshare:latest
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - secretRef:
+            name: hiveshare-env
+        readinessProbe:
+          httpGet:
+            path: /api/v1/auth/whoami
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /api/v1/auth/whoami
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 30
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 256Mi
+            cpu: 500m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hiveshare
+  namespace: hiveshare
+spec:
+  selector:
+    app: hiveshare
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+# OpenShift Route — provides TLS termination via the cluster's router
+# Replace YOUR_CLUSTER_DOMAIN with your actual cluster domain
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: hiveshare
+  namespace: hiveshare
+spec:
+  host: hiveshare-hiveshare.apps.YOUR_CLUSTER_DOMAIN
+  to:
+    kind: Service
+    name: hiveshare
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
