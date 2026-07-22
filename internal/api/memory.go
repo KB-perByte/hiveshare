@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/KB-perByte/hiveshare/internal/embed"
 	"github.com/KB-perByte/hiveshare/internal/models"
@@ -15,6 +16,7 @@ type MemoryHandler struct {
 	mem      *store.MemoryStore
 	hs       *store.HiveshareStore
 	metrics  *store.MetricsStore
+	history  *store.HistoryStore
 	embedder embed.Embedder
 	hub      *realtime.Hub
 	worker   *embed.Worker
@@ -25,13 +27,14 @@ func NewMemoryHandler(
 	mem *store.MemoryStore,
 	hs *store.HiveshareStore,
 	metrics *store.MetricsStore,
+	history *store.HistoryStore,
 	embedder embed.Embedder,
 	hub *realtime.Hub,
 	worker *embed.Worker,
 	views *store.ViewCounter,
 ) *MemoryHandler {
 	return &MemoryHandler{
-		mem: mem, hs: hs, metrics: metrics, embedder: embedder,
+		mem: mem, hs: hs, metrics: metrics, history: history, embedder: embedder,
 		hub: hub, worker: worker, views: views,
 	}
 }
@@ -293,4 +296,259 @@ func (h *MemoryHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.hub.ServeSSE(w, r, hsID)
+}
+
+// ── Per-entry history ────────────────────────────────────────────────────────
+
+func (h *MemoryHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
+	hsID, ok := h.requireAccess(r, w, false)
+	if !ok {
+		return
+	}
+	entryID, err := parseUUID(r, "entryId")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid entry id")
+		return
+	}
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	versions, err := h.history.ListVersions(r.Context(), entryID, hsID, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if versions == nil {
+		versions = []*models.HistoryEntry{}
+	}
+	writeJSON(w, http.StatusOK, versions)
+}
+
+func (h *MemoryHandler) Rollback(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	entryID, err := parseUUID(r, "entryId")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid entry id")
+		return
+	}
+	var req struct {
+		HistoryID int64 `json:"history_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.HistoryID == 0 {
+		writeError(w, http.StatusBadRequest, "history_id is required")
+		return
+	}
+	entry, hasEmb, err := h.history.Rollback(r.Context(), entryID, hsID, req.HistoryID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "rollback failed: "+err.Error())
+		return
+	}
+	if !hasEmb {
+		h.worker.Enqueue(embed.Job{EntryID: entry.ID, Content: entry.Content})
+	}
+	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
+		UserID:      u.ID,
+		HiveshareID: &hsID,
+		EntryID:     &entry.ID,
+		EventType:   "rollback",
+	})
+	_ = h.hub.Publish(r.Context(), models.StreamEvent{
+		Type:        "memory_rolled_back",
+		HiveshareID: hsID,
+		Payload:     entry,
+	})
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func (h *MemoryHandler) Undelete(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	var req struct {
+		HistoryID int64 `json:"history_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.HistoryID == 0 {
+		writeError(w, http.StatusBadRequest, "history_id is required")
+		return
+	}
+	entry, hasEmb, err := h.history.Undelete(r.Context(), req.HistoryID, hsID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "undelete failed: "+err.Error())
+		return
+	}
+	if !hasEmb {
+		h.worker.Enqueue(embed.Job{EntryID: entry.ID, Content: entry.Content})
+	}
+	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
+		UserID:      u.ID,
+		HiveshareID: &hsID,
+		EntryID:     &entry.ID,
+		EventType:   "undelete",
+	})
+	_ = h.hub.Publish(r.Context(), models.StreamEvent{
+		Type:        "memory_undeleted",
+		HiveshareID: hsID,
+		Payload:     entry,
+	})
+	writeJSON(w, http.StatusCreated, entry)
+}
+
+// ── Snapshots ────────────────────────────────────────────────────────────────
+
+func (h *MemoryHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	snap, err := h.history.CreateSnapshot(r.Context(), hsID, u.ID, req.Name, req.Description)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, snap)
+}
+
+func (h *MemoryHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
+	hsID, ok := h.requireAccess(r, w, false)
+	if !ok {
+		return
+	}
+	snaps, err := h.history.ListSnapshots(r.Context(), hsID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if snaps == nil {
+		snaps = []*models.Snapshot{}
+	}
+	writeJSON(w, http.StatusOK, snaps)
+}
+
+func (h *MemoryHandler) GetSnapshot(w http.ResponseWriter, r *http.Request) {
+	hsID, ok := h.requireAccess(r, w, false)
+	if !ok {
+		return
+	}
+	snapshotID, err := strconv.ParseInt(chi.URLParam(r, "snapshotId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snapshot id")
+		return
+	}
+	snap, entries, err := h.history.GetSnapshot(r.Context(), snapshotID, hsID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "snapshot not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"snapshot": snap,
+		"entries":  entries,
+	})
+}
+
+func (h *MemoryHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	_ = hsID
+	snapshotID, err := strconv.ParseInt(chi.URLParam(r, "snapshotId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snapshot id")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	decodeJSON(r, &req)
+	if req.Name == "" {
+		req.Name = "(restored)"
+	}
+	result, err := h.history.RestoreSnapshot(r.Context(), snapshotID, u.ID, req.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, id := range result.NullEmbeddings {
+		entry, getErr := h.mem.Get(r.Context(), id, result.Hiveshare.ID)
+		if getErr == nil {
+			h.worker.Enqueue(embed.Job{EntryID: id, Content: entry.Content})
+		}
+	}
+	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
+		UserID:    u.ID,
+		EventType: "snapshot_restore",
+	})
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"hiveshare":       result.Hiveshare,
+		"entries_restored": result.EntriesCreated,
+	})
+}
+
+func (h *MemoryHandler) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	snapshotID, err := strconv.ParseInt(chi.URLParam(r, "snapshotId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snapshot id")
+		return
+	}
+	_ = h.history.DeleteSnapshot(r.Context(), snapshotID, hsID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Copy entries ─────────────────────────────────────────────────────────────
+
+func (h *MemoryHandler) CopyEntries(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	var req struct {
+		EntryIDs []uuid.UUID `json:"entry_ids"`
+	}
+	if err := decodeJSON(r, &req); err != nil || len(req.EntryIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "entry_ids is required")
+		return
+	}
+	results, err := h.history.CopyEntries(r.Context(), hsID, u.ID, req.EntryIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var entries []*models.MemoryEntry
+	for _, cr := range results {
+		entries = append(entries, cr.Entry)
+		if !cr.HasEmbedding {
+			h.worker.Enqueue(embed.Job{EntryID: cr.Entry.ID, Content: cr.Entry.Content})
+		}
+	}
+	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
+		UserID:      u.ID,
+		HiveshareID: &hsID,
+		EventType:   "copy",
+	})
+	writeJSON(w, http.StatusCreated, entries)
 }

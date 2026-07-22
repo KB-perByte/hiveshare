@@ -139,6 +139,36 @@ type UserMetrics struct {
 	TotalReusesGiven int `json:"total_reuses_given"`
 }
 
+// History
+
+type HistoryEntry struct {
+	HistoryID    int64                  `json:"history_id"`
+	EntryID      uuid.UUID              `json:"entry_id"`
+	HiveshareID  uuid.UUID              `json:"hiveshare_id"`
+	UserID       uuid.UUID              `json:"user_id"`
+	Action       string                 `json:"action"`
+	Content      string                 `json:"content,omitempty"`
+	Summary      string                 `json:"summary,omitempty"`
+	HasEmbedding bool                   `json:"has_embedding"`
+	Tags         []string               `json:"tags"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	SourceType   string                 `json:"source_type"`
+	SourceRef    string                 `json:"source_ref"`
+	SourceURL    string                 `json:"source_url,omitempty"`
+	Tool         string                 `json:"tool,omitempty"`
+	RecordedAt   time.Time              `json:"recorded_at"`
+}
+
+type Snapshot struct {
+	SnapshotID  int64     `json:"snapshot_id"`
+	HiveshareID uuid.UUID `json:"hiveshare_id"`
+	CreatedBy   uuid.UUID `json:"created_by"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	EntryCount  int       `json:"entry_count"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // SSE event payload
 
 type StreamEvent struct {
