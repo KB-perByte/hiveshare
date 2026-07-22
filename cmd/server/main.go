@@ -14,6 +14,7 @@ import (
 	"github.com/KB-perByte/hiveshare/internal/embed"
 	"github.com/KB-perByte/hiveshare/internal/realtime"
 	"github.com/KB-perByte/hiveshare/internal/store"
+	"github.com/KB-perByte/hiveshare/internal/version"
 )
 
 func main() {
@@ -78,7 +79,11 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	slog.Info("hiveshare server listening", "addr", addr)
+	slog.Info("hiveshare server listening",
+		"addr", addr,
+		"commit", version.Commit,
+		"build_time", version.BuildTime,
+	)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("listen", "err", err)

@@ -15,6 +15,7 @@ import (
 	"github.com/KB-perByte/hiveshare/internal/embed"
 	"github.com/KB-perByte/hiveshare/internal/realtime"
 	"github.com/KB-perByte/hiveshare/internal/store"
+	"github.com/KB-perByte/hiveshare/internal/version"
 )
 
 // userStoreKey is used to pass the user store through context for invite acceptance.
@@ -136,7 +137,13 @@ func healthHandler(pool *pgxpool.Pool, rdb *redis.Client) http.HandlerFunc {
 		defer cancel()
 
 		status := http.StatusOK
-		body := map[string]string{"status": "ok", "db": "ok", "redis": "ok"}
+		body := map[string]string{
+			"status":     "ok",
+			"db":         "ok",
+			"redis":      "ok",
+			"commit":     version.Commit,
+			"build_time": version.BuildTime,
+		}
 
 		if err := pool.Ping(ctx); err != nil {
 			status = http.StatusServiceUnavailable

@@ -1,9 +1,13 @@
-.PHONY: all build server mcp cli deps migrate dev clean docker-up docker-down release
+.PHONY: all build server mcp cli deps migrate dev clean docker-up docker-down release server-linux
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-GOFLAGS := -ldflags="-s -w"
 BINDIR  := ./bin
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILDTIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+VERSION_LDFLAGS := -X github.com/KB-perByte/hiveshare/internal/version.Commit=$(COMMIT) \
+	-X github.com/KB-perByte/hiveshare/internal/version.BuildTime=$(BUILDTIME)
+GOFLAGS := -ldflags="-s -w $(VERSION_LDFLAGS)"
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +17,11 @@ build: server mcp cli
 
 server:
 	go build $(GOFLAGS) -o $(BINDIR)/hiveshare-server ./cmd/server
+
+# Cross-compile for EC2 (Ubuntu amd64)
+server-linux:
+	GOOS=linux GOARCH=amd64 go build $(GOFLAGS) -o $(BINDIR)/hiveshare-server-linux ./cmd/server
+	@echo "Built $(BINDIR)/hiveshare-server-linux commit=$(COMMIT) build_time=$(BUILDTIME)"
 
 mcp:
 	go build $(GOFLAGS) -o $(BINDIR)/hiveshare-mcp ./cmd/mcp
@@ -64,10 +73,10 @@ install-mcp: mcp
 # ── Release (local cross-compile) ─────────────────────────────────────────────
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-RELEASE_LDFLAGS := -ldflags="-s -w -X main.version=$(VERSION)"
+RELEASE_LDFLAGS := -ldflags="-s -w $(VERSION_LDFLAGS) -X main.version=$(VERSION)"
 
 release:
-	@echo "Building release binaries for version $(VERSION)..."
+	@echo "Building release binaries for version $(VERSION) commit=$(COMMIT)..."
 	@mkdir -p dist
 	@for GOOS in linux darwin; do \
 	  for GOARCH in amd64 arm64; do \
@@ -94,15 +103,16 @@ clean:
 help:
 	@echo "HiveShare Makefile targets:"
 	@echo ""
-	@echo "  make dev          Start docker, run migrations, start server"
-	@echo "  make build        Build all binaries to ./bin/"
-	@echo "  make server       Build API server"
-	@echo "  make mcp          Build MCP sidecar"
-	@echo "  make cli          Build hshare CLI"
-	@echo "  make migrate      Apply SQL migrations"
-	@echo "  make install      Install hshare to /usr/local/bin"
-	@echo "  make install-mcp  Install hiveshare-mcp to /usr/local/bin"
-	@echo "  make docker-up    Start postgres + redis"
-	@echo "  make docker-down  Stop postgres + redis"
-	@echo "  make release      Cross-compile all platforms → dist/"
-	@echo "  make clean        Remove ./bin/ and dist/"
+	@echo "  make dev            Start docker, run migrations, start server"
+	@echo "  make build          Build all binaries to ./bin/"
+	@echo "  make server         Build API server (embeds git commit + build time)"
+	@echo "  make server-linux   Cross-compile API for EC2 Ubuntu amd64"
+	@echo "  make mcp            Build MCP sidecar"
+	@echo "  make cli            Build hshare CLI"
+	@echo "  make migrate        Apply SQL migrations"
+	@echo "  make install        Install hshare to /usr/local/bin"
+	@echo "  make install-mcp    Install hiveshare-mcp to /usr/local/bin"
+	@echo "  make docker-up      Start postgres + redis"
+	@echo "  make docker-down    Stop postgres + redis"
+	@echo "  make release        Cross-compile all platforms → dist/"
+	@echo "  make clean          Remove ./bin/ and dist/"
