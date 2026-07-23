@@ -88,3 +88,15 @@ CREATE TABLE IF NOT EXISTS hiveshare_snapshot_entries (
 
 CREATE INDEX IF NOT EXISTS hiveshare_snapshots_hs_idx
     ON hiveshare_snapshots (hiveshare_id, created_at DESC);
+
+-- ── Backfill existing entries ────────────────────────────────────────────────
+
+INSERT INTO memory_entries_history
+    (entry_id, hiveshare_id, user_id, action, content, summary, embedding,
+     tags, metadata, source_type, source_ref, source_url, tool)
+SELECT id, hiveshare_id, user_id, 'insert', content, summary, embedding,
+       tags, metadata, source_type, source_ref, source_url, tool
+FROM memory_entries
+WHERE NOT EXISTS (
+    SELECT 1 FROM memory_entries_history WHERE entry_id = memory_entries.id
+);
