@@ -1,4 +1,5 @@
-.PHONY: all build server mcp cli deps migrate dev clean docker-up docker-down release server-linux
+.PHONY: all build server mcp cli deps migrate dev dev-clean clean docker-up docker-down release server-linux \
+       smoke-test smoke-test-full integration-test
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
@@ -37,12 +38,25 @@ deps:
 
 POSTGRES_URL ?= postgres://hiveshare:hiveshare@localhost:5432/hiveshare?sslmode=disable
 
+POSTGRES_CONTAINER ?= $(shell $(CONTAINER_RUNTIME) ps -q --filter ancestor=pgvector/pgvector:pg16 2>/dev/null)
+
 migrate:
 	@echo "Applying migrations..."
-	@for f in migrations/*.sql; do \
-	    echo "  Running $$f..."; \
-	    psql "$(POSTGRES_URL)" -f "$$f"; \
-	done
+	@if command -v psql >/dev/null 2>&1; then \
+	    for f in migrations/*.sql; do \
+	        echo "  Running $$f..."; \
+	        psql "$(POSTGRES_URL)" -f "$$f"; \
+	    done; \
+	elif [ -n "$(POSTGRES_CONTAINER)" ]; then \
+	    for f in migrations/*.sql; do \
+	        echo "  Running $$f (via container)..."; \
+	        $(CONTAINER_RUNTIME) exec -i $(POSTGRES_CONTAINER) \
+	            psql -U hiveshare -d hiveshare -f - < "$$f"; \
+	    done; \
+	else \
+	    echo "Error: psql not found and no postgres container running"; \
+	    exit 1; \
+	fi
 	@echo "Migrations done."
 
 # ── Dev ───────────────────────────────────────────────────────────────────────
@@ -54,11 +68,16 @@ dev: docker-up
 	@echo "Starting server..."
 	EMBED_PROVIDER= go run ./cmd/server
 
+CONTAINER_RUNTIME ?= docker
+
 docker-up:
-	docker compose up -d
+	$(CONTAINER_RUNTIME) compose up -d
 
 docker-down:
-	docker compose down
+	$(CONTAINER_RUNTIME) compose down
+
+dev-clean:
+	$(CONTAINER_RUNTIME) compose down -v
 
 # ── Install CLI ───────────────────────────────────────────────────────────────
 
@@ -93,6 +112,19 @@ release:
 	done
 	@echo "Done. Tarballs in dist/"
 
+# ── Test ──────────────────────────────────────────────────────────────────────
+
+HIVESHARE_TEST_URL ?= $(or $(BASE_URL),http://localhost:8080)
+
+smoke-test:
+	@./scripts/smoke-test.sh $(HIVESHARE_TEST_URL)
+
+smoke-test-full:
+	@./scripts/smoke-test-full.sh $(HIVESHARE_TEST_URL)
+
+integration-test:
+	HIVESHARE_TEST_URL=$(HIVESHARE_TEST_URL) pytest tests/ -v
+
 # ── Clean ─────────────────────────────────────────────────────────────────────
 
 clean:
@@ -114,5 +146,9 @@ help:
 	@echo "  make install-mcp    Install hiveshare-mcp to /usr/local/bin"
 	@echo "  make docker-up      Start postgres + redis"
 	@echo "  make docker-down    Stop postgres + redis"
+	@echo "  make dev-clean      Stop containers and wipe database volume"
+	@echo "  make smoke-test     Basic connectivity check (no user needed)"
+	@echo "  make smoke-test-full  Full endpoint smoke test (curl + jq)"
+	@echo "  make integration-test  Pytest integration tests"
 	@echo "  make release        Cross-compile all platforms → dist/"
 	@echo "  make clean          Remove ./bin/ and dist/"
