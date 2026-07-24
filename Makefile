@@ -1,5 +1,5 @@
 .PHONY: all build server mcp cli deps migrate dev dev-clean clean docker-up docker-down release server-linux \
-       smoke-test smoke-test-full integration-test
+       smoke-test smoke-test-full integration-test psql
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
@@ -9,6 +9,7 @@ BUILDTIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 VERSION_LDFLAGS := -X github.com/KB-perByte/hiveshare/internal/version.Commit=$(COMMIT) \
 	-X github.com/KB-perByte/hiveshare/internal/version.BuildTime=$(BUILDTIME)
 GOFLAGS := -ldflags="-s -w $(VERSION_LDFLAGS)"
+CONTAINER_RUNTIME ?= docker
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ deps:
 
 POSTGRES_URL ?= postgres://hiveshare:hiveshare@localhost:5432/hiveshare?sslmode=disable
 
-POSTGRES_CONTAINER ?= $(shell $(CONTAINER_RUNTIME) ps -q --filter ancestor=pgvector/pgvector:pg16 2>/dev/null)
+POSTGRES_CONTAINER ?= $(shell $(CONTAINER_RUNTIME) compose ps --format '{{.Names}}' 2>/dev/null | grep hiveshare_postgres | head -1)
 
 migrate:
 	@echo "Applying migrations..."
@@ -68,8 +69,6 @@ dev: docker-up
 	@echo "Starting server..."
 	EMBED_PROVIDER= go run ./cmd/server
 
-CONTAINER_RUNTIME ?= docker
-
 docker-up:
 	$(CONTAINER_RUNTIME) compose up -d
 
@@ -79,6 +78,10 @@ docker-down:
 dev-clean:
 	$(CONTAINER_RUNTIME) compose down -v
 
+psql:
+	@echo "**INFO**: Found Container '$(POSTGRES_CONTAINER)' using it to '$(CONTAINER_RUNTIME) exec' for a psql prompt"
+	$(CONTAINER_RUNTIME) exec -it $(POSTGRES_CONTAINER) psql -U hiveshare -d hiveshare
+	
 # ── Install CLI ───────────────────────────────────────────────────────────────
 
 install: cli
@@ -147,6 +150,7 @@ help:
 	@echo "  make docker-up      Start postgres + redis"
 	@echo "  make docker-down    Stop postgres + redis"
 	@echo "  make dev-clean      Stop containers and wipe database volume"
+	@echo "  make psql           Open psql shell in the running postgres container"
 	@echo "  make smoke-test     Basic connectivity check (no user needed)"
 	@echo "  make smoke-test-full  Full endpoint smoke test (curl + jq)"
 	@echo "  make integration-test  Pytest integration tests"
