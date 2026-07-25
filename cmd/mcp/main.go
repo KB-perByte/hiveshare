@@ -23,9 +23,13 @@ type Config struct {
 func loadConfig() Config {
 	// CLI flags / env override
 	cfg := Config{
-		ServerURL:        getenv("HIVESHARE_SERVER_URL", "http://localhost:8080"),
-		APIKey:           os.Getenv("HIVESHARE_API_KEY"),
-		DefaultHiveshare: os.Getenv("HIVESHARE_DEFAULT_HEADSPACE"),
+		ServerURL: getenv("HIVESHARE_SERVER_URL", "http://localhost:8080"),
+		APIKey:    os.Getenv("HIVESHARE_API_KEY"),
+		// Prefer HIVESHARE_DEFAULT_HIVESHARE; HEADSPACE is a legacy alias.
+		DefaultHiveshare: firstNonEmpty(
+			os.Getenv("HIVESHARE_DEFAULT_HIVESHARE"),
+			os.Getenv("HIVESHARE_DEFAULT_HEADSPACE"),
+		),
 	}
 
 	// fall back to config file
@@ -63,6 +67,15 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func main() {

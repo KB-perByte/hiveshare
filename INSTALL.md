@@ -63,6 +63,10 @@ The script will:
 | `OPENAI_EMBED_MODEL` | `text-embedding-3-small` | — |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Required when `EMBED_PROVIDER=ollama` |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | — |
+| `HISTORY_TTL_DAYS` | `0` | Purge history rows older than N days (`0` = keep forever) |
+| `HISTORY_MAX_VERSIONS` | `0` | Keep at most N versions per hive (`0` = unlimited) |
+
+Migrations `001`–`006` are applied by the installer (`005` renames `memory_entries` → `hives`; `006` adds `hives_history` + snapshots).
 
 ### Running the server
 
@@ -143,7 +147,7 @@ export PATH="$HOME/.local/bin:$PATH"
 ```json
 {
   "server_url": "https://your-server",
-  "api_key": "hs_...",
+  "api_key": "hvs_...",
   "default_hiveshare": "",
   "default_hiveshare_name": ""
 }

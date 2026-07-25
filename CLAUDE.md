@@ -10,13 +10,14 @@ cmd/
   mcp/        → MCP sidecar binary (used by Claude Code / Cursor)
   hshare/     → CLI binary (main.go + client.go + config.go)
 internal/
-  api/        → HTTP handlers (router.go, auth.go, memory.go, headspaces.go, …)
+  api/        → HTTP handlers (router.go, auth.go, memory.go=HiveHandler, …)
   mcp/        → MCP protocol + server + client
-  models/     → shared Go types (Hive, Hiveshare, User, roles)
-  store/      → Postgres queries (db.go, memory.go, headspaces.go, users.go, …)
+  models/     → shared Go types (Hive, HistoryEntry, Snapshot, …)
+  store/      → Postgres (db.go, memory.go=HiveStore, history.go, …)
   realtime/   → SSE hub (Redis pub/sub)
   embed/      → async embedding worker (OpenAI / Ollama)
-migrations/   → numbered SQL files applied in order
+migrations/   → 001–006 applied in order
+API.md        → HTTP reference (verified by scripts/test-api-examples.sh)
 deploy/       → OpenShift manifests
 ```
 
@@ -27,6 +28,7 @@ make deps build          # build all three binaries into ./bin/
 make dev                 # docker-up + migrate + run server (EMBED_PROVIDER= for no embeddings)
 make migrate             # apply migrations/*.sql in order
 make docker-up / docker-down
+make smoke-test / smoke-test-full / integration-test
 make release             # cross-compile linux+darwin amd64+arm64 → dist/
 ```
 
@@ -42,29 +44,34 @@ Binaries: `bin/hiveshare-server`, `bin/hiveshare-mcp`, `bin/hshare`
 | `BASE_URL` | Used in invite links |
 | `EMBED_PROVIDER` | `openai` \| `ollama` \| empty (falls back to full-text) |
 | `OPENAI_API_KEY` | Required when `EMBED_PROVIDER=openai` |
+| `HISTORY_TTL_DAYS` | Optional purge age (`0` = forever) |
+| `HISTORY_MAX_VERSIONS` | Optional per-hive version cap (`0` = unlimited) |
 
 ## Naming: hive vs memory
 
-The entity was renamed from `memory_entry` → `hive` in migration 005. The Go type is `Hive`, the DB table is `hives`, API routes use `/hives`, SSE events are `hive_added` / `hive_updated` / `hive_deleted`. Old names (`memory`, `MemoryEntry`) are gone — don't reintroduce them.
+The entity was renamed from `memory_entry` → `hive` in migration 005. The Go type is `Hive`, the DB table is `hives`, API routes use `/hives`, SSE events are `hive_added` / `hive_updated` / `hive_deleted` / `hive_rolled_back` / `hive_undeleted`. Old names (`memory`, `MemoryEntry`) are gone — don't reintroduce them. Handler file is still `internal/api/memory.go` (HiveHandler).
 
 ## Auth
 
 API keys are prefixed `hvs_`, SHA-256 hashed at rest. Cleartext returned only at registration. All API endpoints require `Authorization: Bearer hvs_…`.
 
-## Writes / search flow
+## Writes / search / history flow
 
-1. `POST /hiveshares/{id}/hives` inserts immediately (embedding = NULL).
-2. Async embed worker picks it up and fills the embedding.
+1. `POST /hiveshares/{id}/hives` inserts immediately (embedding = NULL); trigger writes `hives_history` insert row.
+2. Async embed worker fills embedding — **no** history row (trigger excludes embedding column).
 3. Search uses HNSW cosine similarity if embedding present, else PostgreSQL full-text.
 4. `source_ref` is unique per hiveshare; duplicates get auto-suffixed (`PROJ-42-2`).
+5. Rollback / undelete / copy / snapshots live under `/hives/…` and `/snapshots/…` (see `API.md`).
 
 ## MCP tools (what Claude sees)
 
 `search_hives`, `add_hive`, `list_hiveshares`, `get_context`, `get_metrics`
 
+Default hiveshare env: `HIVESHARE_DEFAULT_HIVESHARE` (legacy alias: `HIVESHARE_DEFAULT_HEADSPACE`).
+
 ## Migrations
 
-Apply with `make migrate` or `psql -f migrations/NNN_*.sql` in order. Files are idempotent-safe only if you run them in sequence from 001 onward on a fresh DB; re-running on an existing DB may error — check each file.
+Apply with `make migrate`, `scripts/install-server.sh`, or `psql -f migrations/NNN_*.sql` in order through **006**. Files are mostly idempotent (`IF NOT EXISTS` / `OR REPLACE`).
 
 ## Go module
 

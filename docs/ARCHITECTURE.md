@@ -17,16 +17,17 @@ graph TB
         Router["chi Router\n+ Auth / rate limit / timeout"]
         AuthH["Auth Handler"]
         HSH["Hiveshare Handler"]
-        MemH["Hive Handler\n(search / add / delete / stream)"]
+        MemH["Hive Handler\n(CRUD / search / history\n/ snapshots / stream)"]
         MetH["Metrics Handler"]
         Health["GET /health"]
         EmbedW["Embed Worker Pool\n(async)"]
+        Hist["HistoryStore\n(trigger-backed)"]
         Hub["SSE Hub\n(1 Redis sub / hiveshare)"]
         Views["ViewCounter\n(Redis INCR → PG flush)"]
     end
 
     subgraph Storage["Persistence"]
-        PG[("PostgreSQL 16\n+ pgvector HNSW")]
+        PG[("PostgreSQL 16\n+ pgvector HNSW\n+ hives_history")]
         Redis[("Redis 7\npub/sub + view deltas")]
     end
 
@@ -39,6 +40,8 @@ graph TB
     Router --> Health
     MemH -->|enqueue| EmbedW
     EmbedW -->|UPDATE embedding| PG
+    MemH --> Hist
+    Hist --> PG
     MemH --> Hub
     MemH --> Views
     Hub -->|1 SUBSCRIBE / hiveshare| Redis
@@ -63,9 +66,12 @@ graph TB
 | Vector search | pgvector **HNSW** cosine | `migrations/002_indexes.sql`, `003_hardening.sql` |
 | Full-text fallback | `plainto_tsquery` + `ts_rank` | `internal/store/memory.go` (HiveStore) |
 | Embedding | **Async** worker pool; HTTP path stores `embedding = NULL` then UPDATE | `internal/embed/worker.go` |
+| History | Trigger on content/summary/tags/metadata (+ delete); rollback / undelete / copy | `migrations/006_hive_history.sql`, `store/history.go` |
+| Snapshots | Point-in-time hiveshare capture; restore → **new** hiveshare (max 10k entries) | `store/history.go` |
 | Real-time | One Redis sub per hiveshare → fan-out to local SSE clients | `internal/realtime/hub.go` |
 | Views | Redis `INCR`, flush to Postgres every 60s | `internal/store/views.go` |
 | usage_events TTL | Rolling delete > 90 days (daily job) | `cmd/server/main.go` |
+| History retention | Optional `HISTORY_TTL_DAYS` / `HISTORY_MAX_VERSIONS` (default 0 = forever) | `cmd/server/main.go` |
 | Health | `GET /health` — DB + Redis ping | `internal/api/router.go` |
 | Logging | `slog` JSON | `cmd/server/main.go` |
 | MCP server | stdio JSON-RPC | `internal/mcp/server.go` |
@@ -95,8 +101,26 @@ All items below were found in the initial review and are **fixed in tree**.
 | 2.15 | Invite expiry not in SQL | `status='pending' AND expires_at > NOW()` |
 | 2.16 | `memory` renamed to `hive`; table `memory_entries` → `hives` | Migration 005; `source_ref` unique per hiveshare, API auto-suffixes duplicates |
 | 2.17 | Delete ignored errors, left Redis view key, no SSE event | Returns 404 on not-found; cleans Redis key; publishes `hive_deleted`; logs usage event |
+| 2.18 | No version history / snapshots | Migration 006: `hives_history` trigger, rollback/undelete/copy, snapshots (restore → new hiveshare) |
 
-**Ops note:** Existing plaintext API keys will not authenticate after the hash change — users must re-register (or accept a fresh invite). Apply migrations through `003_hardening.sql`.
+**Ops note:** Existing plaintext API keys will not authenticate after the hash change — users must re-register (or accept a fresh invite). Apply migrations through `006_hive_history.sql` (`make migrate` or `scripts/install-server.sh`).
+
+---
+
+## 2.5 History & snapshots
+
+Content mutations on `hives` are audited by a Postgres trigger (`record_hive_history`). The trigger fires on **INSERT**, **DELETE**, and **UPDATE OF content, summary, tags, metadata** — embedding-only updates from the async embed worker are excluded so history stays author-meaningful.
+
+| Capability | Behaviour |
+|---|---|
+| List versions | `GET …/hives/{id}/history` |
+| Rollback | Restores content fields from a history row; re-embeds if history embedding is NULL |
+| Undelete | Re-inserts a deleted hive from its `delete` history row (`source_ref` auto-suffixed on conflict) |
+| Copy | Copies hives into a target hiveshare; requires membership on the **source** |
+| Snapshot | Copies all hives (incl. embeddings) for a hiveshare; rejected above 10k entries |
+| Restore | Creates a **new** hiveshare from a snapshot (original untouched) |
+
+Optional retention: `HISTORY_TTL_DAYS`, `HISTORY_MAX_VERSIONS` (both default `0` = keep forever).
 
 ---
 
@@ -106,15 +130,16 @@ All items below were found in the initial review and are **fixed in tree**.
 
 ```mermaid
 graph LR
-    A["Add memory\nPOST /hives"] -->|"enqueue"| B["Embed Worker"]
+    A["Add hive\nPOST /hives"] -->|"enqueue"| B["Embed Worker"]
     A -->|"fast INSERT\nembedding=NULL"| C["PostgreSQL"]
-    B -->|"async UPDATE"| C
+    B -->|"async UPDATE\n(no history row)"| C
     D["Search\nPOST /hives/search"] -->|"embed query"| E["Embedding API"]
     D -->|"HNSW scan"| C
     F["SSE Stream"] -->|"1 sub/hiveshare"| G["Redis"]
-    H["Get memory"] -->|"INCR views"| G
+    H["Get hive"] -->|"INCR views"| G
     I["Metrics"] -->|"indexed time range"| C
     J["Auth"] -->|"DB lookup\n(no cache yet)"| C
+    K["Snapshot"] -->|"bulk copy"| C
 ```
 
 ### 3.2 Per-component scale limits
@@ -144,7 +169,7 @@ C4Context
 
     System_Boundary(server, "Single Server (docker-compose)") {
         System(api, "hiveshare-server", "Go: REST + SSE + embed workers + health")
-        SystemDb(pg, "PostgreSQL + pgvector HNSW", "Users, hiveshares, memory, events")
+        SystemDb(pg, "PostgreSQL + pgvector HNSW", "Users, hiveshares, hives, history, events")
         SystemDb(redis, "Redis", "SSE pub/sub + view counters")
     }
 
@@ -159,7 +184,7 @@ C4Context
     Rel(api, ollama, "HTTP (async workers)", "nomic-embed-text")
 ```
 
-### 4.2 Data flow — adding a memory entry
+### 4.2 Data flow — adding a hive
 
 ```mermaid
 sequenceDiagram
@@ -176,6 +201,7 @@ sequenceDiagram
     MCP->>API: POST /api/v1/hiveshares/:id/hives
     API->>API: Auth (SHA-256 key lookup)
     API->>PG: INSERT hives (embedding NULL, source_ref unique per hiveshare)
+    Note over PG: trigger → hives_history (insert)
     PG-->>API: entry_id
     API->>Worker: Enqueue(entry_id, content)
     API->>PG: INSERT usage_events {event='add'}
@@ -185,9 +211,10 @@ sequenceDiagram
     Worker->>Embed: Embed(content)
     Embed-->>Worker: vector
     Worker->>PG: UPDATE embedding
+    Note over PG: no history row (embedding excluded from trigger)
 ```
 
-### 4.3 Data flow — searching memory
+### 4.3 Data flow — searching hives
 
 ```mermaid
 sequenceDiagram
@@ -390,6 +417,8 @@ The following topics produced zero surviving verified claims — all specific nu
 | F11b | Redis-backed views counter | Done |
 | F17a | Structured slog logging | Done |
 | F17b | Rate limit 60/min per key | Done |
+| F19 | Hive history, rollback, undelete, copy | Done |
+| F20 | Hiveshare snapshots + restore-to-new | Done |
 
 ### Next (before wider / multi-replica)
 

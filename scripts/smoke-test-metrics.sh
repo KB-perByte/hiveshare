@@ -23,11 +23,11 @@ HS_MET_CODE=$(curl -s -o $SMOKE_TMPDIR/met_hs.json -w "%{http_code}" "$SMOKE_BAS
 HS_MET=$(cat $SMOKE_TMPDIR/met_hs.json)
 smoke_check "$HS_MET_CODE" "200" "hiveshare metrics returns 200"
 smoke_check "$(echo "$HS_MET" | jq 'has("hiveshare")')" "true" "has hiveshare summary"
-smoke_check "$(echo "$HS_MET" | jq 'has("memory")')" "true" "has memory stats"
+smoke_check "$(echo "$HS_MET" | jq 'has("hive")')" "true" "has hive stats"
 smoke_check "$(echo "$HS_MET" | jq 'has("collaboration")')" "true" "has collaboration stats"
 smoke_check "$(echo "$HS_MET" | jq 'has("coverage")')" "true" "has coverage stats"
 smoke_check "$(echo "$HS_MET" | jq 'has("activity")')" "true" "has activity stats"
-TOTAL=$(echo "$HS_MET" | jq '.memory.total_entries')
+TOTAL=$(echo "$HS_MET" | jq '.hive.total_entries')
 [ "$TOTAL" -ge 1 ] && smoke_ok "total_entries >= 1" || smoke_fail "total_entries is $TOTAL"
 
 smoke_section "User metrics"

@@ -48,6 +48,8 @@ curl -s http://localhost:8080/health
 | `OPENAI_EMBED_MODEL` | `text-embedding-3-small` | |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Required if `EMBED_PROVIDER=ollama` |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | |
+| `HISTORY_TTL_DAYS` | `0` | Purge history older than N days (`0` = forever) |
+| `HISTORY_MAX_VERSIONS` | `0` | Max versions kept per hive (`0` = unlimited) |
 
 ## CLI Quick Start
 
@@ -72,6 +74,15 @@ echo "PROJ-123 is about refactoring the JWT middleware..." | \
 
 # Search
 ./bin/hshare hive search "JWT authentication"
+
+# History / rollback
+./bin/hshare hive history <entry-id>
+./bin/hshare hive rollback <entry-id> --version <history-id>
+
+# Snapshots
+./bin/hshare hiveshare snapshot create --name "before-refactor"
+./bin/hshare hiveshare snapshot list
+./bin/hshare hiveshare snapshot restore <snapshot-id> --name "restored copy"
 
 # Invite a colleague
 ./bin/hshare invite alice@example.com
@@ -101,7 +112,7 @@ Add to your Claude Code MCP config (`~/.claude/claude_desktop_config.json` or pr
       "env": {
         "HIVESHARE_API_KEY": "hvs_your_key_here",
         "HIVESHARE_SERVER_URL": "http://localhost:8080",
-        "HIVESHARE_DEFAULT_HEADSPACE": "your-hiveshare-uuid"
+        "HIVESHARE_DEFAULT_HIVESHARE": "your-hiveshare-uuid"
       }
     }
   }
@@ -144,33 +155,34 @@ Show me metrics for this hiveshare.
 2. An invite link is printed: `http://localhost:8080/api/v1/invitations/<token>/accept`
 3. Rooster opens the link (or POSTs to it with `{"name": "Rooster"}`)
 4. Rooster gets a new account (API key returned once) and is added to the hiveshare
-5. Rooster saves the key in CLI/MCP config and starts sharing memory
+5. Rooster saves the key in CLI/MCP config and starts sharing
 
 Invites are rejected in SQL when `status != 'pending'` or `expires_at` has passed (default 7 days).
 
 ## Metrics
 
 `GET /api/v1/hiveshares/:id/metrics` returns:
-- **Memory stats**: entry count, source type breakdown, tool breakdown
+- **Hive stats**: entry count, source type breakdown, tool breakdown
 - **Collaboration**: total views, reuses, reuse rate, top contributors
-- **Coverage**: how many Jira refs / GitHub refs have memory entries
+- **Coverage**: how many Jira refs / GitHub refs have hive entries
 - **Activity**: last 7-day adds, searches, active users
 
 ## Project Structure
 
 ```
 hiveshare/
-├── cmd/server/     API server (embed workers, view flusher, event TTL)
+├── cmd/server/     API server (embed workers, view flusher, history purge, event TTL)
 ├── cmd/mcp/        MCP sidecar (connect to Claude/Cursor)
 ├── cmd/hshare/     CLI
 ├── internal/
 │   ├── api/        HTTP handlers + router (rate limit, timeout, /health)
 │   ├── embed/      Embedding backends + async worker pool
 │   ├── mcp/        MCP protocol + tool definitions
-│   ├── models/     Domain types
+│   ├── models/     Domain types (Hive, HistoryEntry, Snapshot, …)
 │   ├── realtime/   Redis pub/sub + shared SSE hub
-│   └── store/      PostgreSQL + Redis view counters
-└── migrations/     SQL schema (HNSW vector index in 002/003)
+│   └── store/      PostgreSQL + Redis view counters + history store
+├── migrations/     001–006 (HNSW, hive rename, history/snapshots)
+└── API.md          Full HTTP reference with curl examples
 ```
 
-Hive **list** returns metadata without full `content` (keeps MCP/CLI payloads small). Use get or search for body text. Embeddings are written asynchronously after add/update; until then, search falls back to full-text for those rows. `source_ref` is unique per hiveshare — the API auto-suffixes duplicates (e.g. `PROJ-123-2`). Write-access members can delete any hive; deletion also cleans up the Redis view counter and fires a `hive_deleted` SSE event.
+Hive **list** returns metadata without full `content` (keeps MCP/CLI payloads small). Use get or search for body text. Embeddings are written asynchronously after add/update; until then, search falls back to full-text for those rows. `source_ref` is unique per hiveshare — the API auto-suffixes duplicates (e.g. `PROJ-123-2`). Write-access members can delete any hive; deletion also cleans up the Redis view counter and fires a `hive_deleted` SSE event. Content mutations are recorded in `hives_history` (embedding-only updates are excluded); snapshots restore into a new hiveshare.

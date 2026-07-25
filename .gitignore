@@ -12,6 +12,7 @@ coverage.out
 # Environment / secrets
 .env
 .env.*
+!.env.example
 *.env
 
 # Private demo / ops notes (hostnames, keys, personal runbooks)

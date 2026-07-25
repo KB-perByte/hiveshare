@@ -41,6 +41,8 @@ sequenceDiagram
 - **Metrics** — reuse rate, top contributors, source coverage, 7-day activity
 - **Unique source refs** — one hive per `source_ref` per hiveshare; duplicates are auto-suffixed (`PROJ-42-2`) so saves never conflict
 - **Hive deletion** — write-access members can delete any hive; Redis view counters are cleaned up and a `hive_deleted` event is broadcast over SSE
+- **Version history** — every content change is recorded; roll back a hive or undelete after removal
+- **Snapshots** — capture a hiveshare point-in-time and restore into a **new** hiveshare; copy hives between spaces
 - **Hardened API** — hashed API keys, rate limits, body size cap, request timeouts, `GET /health`
 
 ---
@@ -112,7 +114,7 @@ Add to `~/.claude/claude_desktop_config.json`:
       "env": {
         "HIVESHARE_API_KEY": "hvs_your_key",
         "HIVESHARE_SERVER_URL": "https://your-server",
-        "HIVESHARE_DEFAULT_HEADSPACE": "your-hiveshare-uuid"
+        "HIVESHARE_DEFAULT_HIVESHARE": "your-hiveshare-uuid"
       }
     }
   }
@@ -159,6 +161,16 @@ hshare hiveshare use ID
 hshare hive add --source-ref REF [--source-type TYPE] [--tool TOOL] [< file]
 hshare hive search QUERY [--limit N] [--source-type TYPE]
 hshare hive list [--source-type TYPE] [--limit N]
+hshare hive history ENTRY_ID [--limit N]
+hshare hive rollback ENTRY_ID --version HISTORY_ID
+hshare hive undelete --version HISTORY_ID
+hshare hive copy --to TARGET_HS --entries ID1,ID2
+
+hshare hiveshare snapshot create [--name NAME]
+hshare hiveshare snapshot list
+hshare hiveshare snapshot show ID
+hshare hiveshare snapshot restore ID [--name NAME]
+hshare hiveshare snapshot delete ID
 
 hshare invite EMAIL [--role all|view]
 hshare members list
@@ -169,7 +181,7 @@ hshare metrics [--me]
 
 Source types: `jira`, `github_issue`, `github_pr`, `file`, `url`, `manual`  
 Tools: `claude`, `cursor`, `manual`  
-Roles: `all` (invite + read + write memory) · `view` (read-only)
+Roles: `all` (invite + read + write) · `view` (read-only)
 
 ---
 
@@ -199,6 +211,8 @@ Roles: `all` (invite + read + write memory) · `view` (read-only)
 | `OPENAI_EMBED_MODEL` | `text-embedding-3-small` | |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Required when `EMBED_PROVIDER=ollama` |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | |
+| `HISTORY_TTL_DAYS` | `0` | Purge history older than N days (`0` = forever) |
+| `HISTORY_MAX_VERSIONS` | `0` | Max versions kept per hive (`0` = unlimited) |
 
 ---
 
@@ -216,12 +230,14 @@ MCP sidecar ──┘                    │  embed workers, health
 
 - Auth: Bearer `hvs_…` key; **SHA-256 at rest**, cleartext returned only at registration
 - Writes: hive inserts immediately; embeddings filled async (search uses full-text until ready)
+- History: trigger on content/summary/tags/metadata (not embedding fills); rollback / undelete / copy
+- Snapshots: full hiveshare capture; restore creates a new hiveshare (capped at 10k entries)
 - `source_ref` is unique per hiveshare — the API auto-suffixes duplicates (`PROJ-42-2`)
 - Delete: removes the DB row, Redis view counter, logs a usage event, and publishes `hive_deleted` over SSE
 - List endpoints omit full `content` (use Get/Search for body text)
 - Ops: `GET /health` checks Postgres + Redis
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams, scale analysis, and the V2/V3 roadmap. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides. See [`docs/DEMO.md`](docs/DEMO.md) for a full EC2 + Fedora + Mac two-person demo script (all CLI commands).
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams, scale analysis, and the V2/V3 roadmap. See [`API.md`](API.md) for the full HTTP reference. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides.
 
 ---
 

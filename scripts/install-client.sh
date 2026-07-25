@@ -313,4 +313,6 @@ echo "    hshare hiveshare create <name>  # create a new hiveshare"
 echo "    hshare hiveshare use <id>       # set active hiveshare"
 echo "    hshare hive add --content '…'   # save a hive"
 echo "    hshare hive search '<query>'    # search hives"
+echo "    hshare hive history <id>        # version history"
+echo "    hshare hiveshare snapshot list  # list snapshots"
 echo

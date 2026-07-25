@@ -336,7 +336,7 @@ CODE=$(curl -s -o "$TMPDIR/hs_met.json" -w "%{http_code}" \
   "$API/hiveshares/$HS_ID/metrics" -H "$AUTH_A")
 check_code "$CODE" "200" "GET /hiveshares/{id}/metrics"
 jq -e '.hiveshare' "$TMPDIR/hs_met.json" > /dev/null && ok "has hiveshare" || fail "missing"
-jq -e '.memory' "$TMPDIR/hs_met.json" > /dev/null && ok "has memory" || fail "missing"
+jq -e '.hive' "$TMPDIR/hs_met.json" > /dev/null && ok "has hive" || fail "missing"
 jq -e '.collaboration' "$TMPDIR/hs_met.json" > /dev/null && ok "has collaboration" || fail "missing"
 jq -e '.coverage' "$TMPDIR/hs_met.json" > /dev/null && ok "has coverage" || fail "missing"
 jq -e '.activity' "$TMPDIR/hs_met.json" > /dev/null && ok "has activity" || fail "missing"
