@@ -21,10 +21,13 @@ import (
 // userStoreKey is used to pass the user store through context for invite acceptance.
 type userStoreKey struct{}
 
+// NewRouter constructs and returns the fully wired chi router for the hiveshare
+// HTTP API. It mounts all route groups, applies rate-limiting and auth middleware,
+// and wires together the provided stores, embedder, hub, and worker.
 func NewRouter(
 	userStore *store.UserStore,
 	hsStore *store.HiveshareStore,
-	memStore *store.MemoryStore,
+	hiveStore *store.HiveStore,
 	metricsStore *store.MetricsStore,
 	embedder embed.Embedder,
 	hub *realtime.Hub,
@@ -56,7 +59,7 @@ func NewRouter(
 
 	auth := NewAuthHandler(userStore)
 	hs := NewHiveshareHandler(hsStore, metricsStore)
-	mem := NewMemoryHandler(memStore, hsStore, metricsStore, embedder, hub, worker, views)
+	hive := NewHiveHandler(hiveStore, hsStore, metricsStore, embedder, hub, worker, views)
 	met := NewMetricsHandler(metricsStore)
 
 	r.Get("/health", healthHandler(pool, rdb))
@@ -85,19 +88,19 @@ func NewRouter(
 				r.Get("/hiveshares/{id}/members", hs.ListMembers)
 				r.Delete("/hiveshares/{id}/members/{userId}", hs.RemoveMember)
 
-				r.Get("/hiveshares/{id}/memory", mem.List)
-				r.Post("/hiveshares/{id}/memory", mem.Create)
-				r.Get("/hiveshares/{id}/memory/{entryId}", mem.Get)
-				r.Put("/hiveshares/{id}/memory/{entryId}", mem.Update)
-				r.Delete("/hiveshares/{id}/memory/{entryId}", mem.Delete)
-				r.Post("/hiveshares/{id}/memory/search", mem.Search)
+				r.Get("/hiveshares/{id}/hives", hive.List)
+				r.Post("/hiveshares/{id}/hives", hive.Create)
+				r.Get("/hiveshares/{id}/hives/{entryId}", hive.Get)
+				r.Put("/hiveshares/{id}/hives/{entryId}", hive.Update)
+				r.Delete("/hiveshares/{id}/hives/{entryId}", hive.Delete)
+				r.Post("/hiveshares/{id}/hives/search", hive.Search)
 
 				r.Get("/hiveshares/{id}/metrics", hs.Metrics)
 				r.Get("/metrics/me", met.UserMetrics)
 			})
 
 			// SSE must not use the request timeout middleware
-			r.Get("/hiveshares/{id}/stream", mem.Stream)
+			r.Get("/hiveshares/{id}/stream", hive.Stream)
 		})
 	})
 

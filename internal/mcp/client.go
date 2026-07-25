@@ -9,7 +9,10 @@ import (
 	"net/http"
 )
 
-// APIClient is a thin HTTP client for the hiveshare API,
+// APIClient is a thin authenticated HTTP client for the hiveshare REST API.
+// It is used by the MCP Server to proxy tool calls without holding any state
+// beyond the base URL and API key.
+
 // used by the MCP server to proxy tool calls.
 type APIClient struct {
 	BaseURL string
@@ -17,6 +20,8 @@ type APIClient struct {
 	HTTP    *http.Client
 }
 
+// NewAPIClient returns an APIClient configured with the given server URL and
+// API key. Uses http.DefaultClient for transport.
 func NewAPIClient(baseURL, apiKey string) *APIClient {
 	return &APIClient{
 		BaseURL: baseURL,
@@ -53,38 +58,43 @@ func (c *APIClient) do(ctx context.Context, method, path string, body interface{
 	return nil
 }
 
+// ListHeadspaces returns all hiveshares accessible to the authenticated user.
 func (c *APIClient) ListHeadspaces(ctx context.Context) ([]map[string]interface{}, error) {
 	var result []map[string]interface{}
 	err := c.do(ctx, http.MethodGet, "/api/v1/hiveshares", nil, &result)
 	return result, err
 }
 
-func (c *APIClient) SearchMemory(ctx context.Context, hiveshareID, query, sourceType string, limit int) (map[string]interface{}, error) {
+// SearchHives performs a semantic or full-text search over hives in a hiveshare.
+func (c *APIClient) SearchHives(ctx context.Context, hiveshareID, query, sourceType string, limit int) (map[string]interface{}, error) {
 	payload := map[string]interface{}{
 		"query":       query,
 		"source_type": sourceType,
 		"limit":       limit,
 	}
 	var result map[string]interface{}
-	path := fmt.Sprintf("/api/v1/hiveshares/%s/memory/search", hiveshareID)
+	path := fmt.Sprintf("/api/v1/hiveshares/%s/hives/search", hiveshareID)
 	err := c.do(ctx, http.MethodPost, path, payload, &result)
 	return result, err
 }
 
-func (c *APIClient) AddMemory(ctx context.Context, hiveshareID string, entry map[string]interface{}) (map[string]interface{}, error) {
+// AddHive saves a new hive entry to the given hiveshare.
+func (c *APIClient) AddHive(ctx context.Context, hiveshareID string, entry map[string]interface{}) (map[string]interface{}, error) {
 	var result map[string]interface{}
-	path := fmt.Sprintf("/api/v1/hiveshares/%s/memory", hiveshareID)
+	path := fmt.Sprintf("/api/v1/hiveshares/%s/hives", hiveshareID)
 	err := c.do(ctx, http.MethodPost, path, entry, &result)
 	return result, err
 }
 
+// GetContext returns all hive entries for a specific source reference.
 func (c *APIClient) GetContext(ctx context.Context, hiveshareID, sourceRef string) (interface{}, error) {
 	var result interface{}
-	path := fmt.Sprintf("/api/v1/hiveshares/%s/memory?source_ref=%s&limit=100", hiveshareID, sourceRef)
+	path := fmt.Sprintf("/api/v1/hiveshares/%s/hives?source_ref=%s&limit=100", hiveshareID, sourceRef)
 	err := c.do(ctx, http.MethodGet, path, nil, &result)
 	return result, err
 }
 
+// GetMetrics returns the analytics snapshot for the given hiveshare.
 func (c *APIClient) GetMetrics(ctx context.Context, hiveshareID string) (interface{}, error) {
 	var result interface{}
 	path := fmt.Sprintf("/api/v1/hiveshares/%s/metrics", hiveshareID)

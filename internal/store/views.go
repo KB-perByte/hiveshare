@@ -21,8 +21,16 @@ type ViewCounter struct {
 	db  *pgxpool.Pool
 }
 
+// NewViewCounter returns a ViewCounter using Redis for fast increments and
+// Postgres for durable storage.
 func NewViewCounter(rdb *redis.Client, db *pgxpool.Pool) *ViewCounter {
 	return &ViewCounter{rdb: rdb, db: db}
+}
+
+// Delete removes the Redis view counter for an entry. Call this after deleting
+// a hive so the key does not linger until the next flush cycle.
+func (v *ViewCounter) Delete(ctx context.Context, entryID uuid.UUID) {
+	_ = v.rdb.Del(ctx, viewsKeyPrefix+entryID.String()).Err()
 }
 
 // Increment records a view in Redis. Returns the pending delta (including this view).
@@ -89,7 +97,7 @@ func (v *ViewCounter) flushKey(ctx context.Context, key string) {
 		return
 	}
 	_, err = v.db.Exec(ctx,
-		`UPDATE memory_entries SET views = views + $2 WHERE id = $1`, id, n,
+		`UPDATE hives SET views = views + $2 WHERE id = $1`, id, n,
 	)
 	if err != nil {
 		// put the delta back so we don't lose counts

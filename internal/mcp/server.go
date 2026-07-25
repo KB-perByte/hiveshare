@@ -10,7 +10,9 @@ import (
 
 const serverVersion = "0.1.0"
 
-// Server is the MCP stdio server.
+// Server is the MCP stdio server. It reads JSON-RPC requests from stdin and
+// writes responses to stdout, proxying tool calls to the hiveshare HTTP API via
+// an embedded APIClient.
 type Server struct {
 	client         *APIClient
 	defaultHS      string // default hiveshare ID
@@ -19,6 +21,8 @@ type Server struct {
 	initialized    bool
 }
 
+// NewServer creates a Server that uses client to proxy tool calls and defaults
+// to defaultHiveshare when the caller omits a hiveshare_id argument.
 func NewServer(client *APIClient, defaultHiveshare string, reader io.Reader, writer io.Writer) *Server {
 	return &Server{
 		client:    client,
@@ -28,6 +32,8 @@ func NewServer(client *APIClient, defaultHiveshare string, reader io.Reader, wri
 	}
 }
 
+// Run reads JSON-RPC requests until EOF or ctx cancellation, dispatching each
+// synchronously and writing the response before reading the next.
 func (s *Server) Run(ctx context.Context) error {
 	for {
 		select {
@@ -130,16 +136,16 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]inte
 	case "list_hiveshares":
 		return s.client.ListHeadspaces(ctx)
 
-	case "search_memory":
+	case "search_hives":
 		query := stringArg(args, "query")
 		if query == "" {
 			return nil, Errorf(-32602, "query is required")
 		}
 		sourceType := stringArg(args, "source_type")
 		limit := intArg(args, "limit", 10)
-		return s.client.SearchMemory(ctx, hsID, query, sourceType, limit)
+		return s.client.SearchHives(ctx, hsID, query, sourceType, limit)
 
-	case "add_memory":
+	case "add_hive":
 		content := stringArg(args, "content")
 		sourceType := stringArg(args, "source_type")
 		sourceRef := stringArg(args, "source_ref")
@@ -155,7 +161,7 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]inte
 			"tool":        stringArgDefault(args, "tool", "claude"),
 			"tags":        sliceArg(args, "tags"),
 		}
-		return s.client.AddMemory(ctx, hsID, entry)
+		return s.client.AddHive(ctx, hsID, entry)
 
 	case "get_context":
 		sourceRef := stringArg(args, "source_ref")
@@ -176,8 +182,8 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]inte
 func tools() []Tool {
 	return []Tool{
 		{
-			Name:        "search_memory",
-			Description: "Search memory entries in a hiveshare using semantic or full-text search. Use this before asking the user about context — the memory may already have what you need.",
+			Name:        "search_hives",
+			Description: "Search hives in a hiveshare using semantic or full-text search. Use this before asking the user about context — the hive may already have what you need.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]Property{
@@ -190,7 +196,7 @@ func tools() []Tool {
 			},
 		},
 		{
-			Name:        "add_memory",
+			Name:        "add_hive",
 			Description: "Save crunched context to the hiveshare so teammates can reuse it. Call this after you process a Jira ticket, GitHub issue, PR, or any other artifact.",
 			InputSchema: InputSchema{
 				Type: "object",
@@ -217,7 +223,7 @@ func tools() []Tool {
 		},
 		{
 			Name:        "get_context",
-			Description: "Get all memory entries for a specific source reference (e.g. all notes on PROJ-123). Use to load full team context for a ticket or issue.",
+			Description: "Get all hives for a specific source reference (e.g. all notes on PROJ-123). Use to load full team context for a ticket or issue.",
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]Property{

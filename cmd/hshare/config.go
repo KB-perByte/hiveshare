@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 )
 
+// CLIConfig holds the persisted CLI configuration. Fields are read from the
+// JSON config file and can be overridden by environment variables.
 type CLIConfig struct {
 	ServerURL        string `json:"server_url"`
 	APIKey           string `json:"api_key"`
@@ -13,6 +15,8 @@ type CLIConfig struct {
 	DefaultHSName    string `json:"default_hiveshare_name"`
 }
 
+// configPath returns the path to the JSON config file, respecting
+// HIVESHARE_CONFIG_DIR if set.
 func configPath() string {
 	if d := os.Getenv("HIVESHARE_CONFIG_DIR"); d != "" {
 		return filepath.Join(d, "config.json")
@@ -21,6 +25,8 @@ func configPath() string {
 	return filepath.Join(home, ".config", "hiveshare", "config.json")
 }
 
+// loadConfig returns the effective CLI config, merging environment variables
+// (highest priority) over the persisted JSON file.
 func loadConfig() CLIConfig {
 	cfg := CLIConfig{
 		ServerURL: getenvOrDefault("HIVESHARE_SERVER_URL", "http://localhost:8080"),
@@ -45,6 +51,8 @@ func loadConfig() CLIConfig {
 	return cfg
 }
 
+// saveConfig atomically writes cfg to the JSON config file, creating the
+// directory if it does not exist. The file is mode 0600 (owner-read only).
 func saveConfig(cfg CLIConfig) error {
 	p := configPath()
 	os.MkdirAll(filepath.Dir(p), 0700)

@@ -8,11 +8,15 @@ import (
 	"net/http"
 )
 
+// Client is the HTTP client used by all hshare CLI commands to talk to the
+// hiveshare server. It attaches the API key as a Bearer token on every request.
 type Client struct {
 	BaseURL string
 	APIKey  string
 }
 
+// newClient builds a Client from the active CLI config. Returns an error if
+// no API key is configured.
 func newClient() (*Client, error) {
 	cfg := loadConfig()
 	if cfg.APIKey == "" {

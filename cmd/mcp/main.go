@@ -1,3 +1,5 @@
+// Command mcp starts the HiveShare MCP stdio server, which allows AI assistants
+// (Claude, Cursor, etc.) to save and retrieve hive context via MCP tool calls.
 package main
 
 import (
@@ -10,6 +12,8 @@ import (
 	mcpsrv "github.com/KB-perByte/hiveshare/internal/mcp"
 )
 
+// Config holds the MCP server runtime configuration, loaded from environment
+// variables and the shared CLI config file.
 type Config struct {
 	ServerURL        string `json:"server_url"`
 	APIKey           string `json:"api_key"`

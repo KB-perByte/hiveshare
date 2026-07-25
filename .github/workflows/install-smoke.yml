@@ -1,0 +1,85 @@
+name: Install & Smoke Test
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: Install client + server, smoke test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: hiveshare
+          POSTGRES_PASSWORD: hiveshare
+          POSTGRES_DB: hiveshare
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hiveshare"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://hiveshare:hiveshare@localhost:5432/hiveshare
+      POSTGRES_URL: postgresql://hiveshare:hiveshare@localhost:5432/hiveshare
+      REDIS_URL: redis://localhost:6379
+      EMBED_PROVIDER: ""
+      LISTEN_ADDR: ":8080"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run migrations
+        run: |
+          for f in migrations/*.sql; do
+            echo "Applying $f..."
+            psql "$POSTGRES_URL" -f "$f"
+          done
+
+      - name: Install server
+        run: go install ./cmd/server
+
+      - name: Install hshare CLI
+        run: go install ./cmd/hshare
+
+      - name: Smoke test — hshare --help
+        run: hshare --help
+
+      - name: Smoke test — server health
+        run: |
+          server &
+          SERVER_PID=$!
+          # Wait up to 10s for the server to be ready
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost:8080/health; then
+              echo ""
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:8080/health | grep '"status":"ok"'
+          kill $SERVER_PID

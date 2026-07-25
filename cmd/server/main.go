@@ -51,20 +51,20 @@ func main() {
 	// layers
 	userStore := store.NewUserStore(pool)
 	hsStore := store.NewHiveshareStore(pool)
-	memStore := store.NewMemoryStore(pool)
+	hiveStore := store.NewHiveStore(pool)
 	metricsStore := store.NewMetricsStore(pool)
 	embedder := embed.New()
 	hub := realtime.NewHub(rdb)
 	views := store.NewViewCounter(rdb, pool)
 	views.StartFlusher(ctx, 60*time.Second)
 
-	worker := embed.NewWorker(embedder, memStore, 2, 64)
+	worker := embed.NewWorker(embedder, hiveStore, 2, 64)
 	worker.Start(ctx, 2)
 
 	// rolling TTL for usage_events (retain 90 days)
 	go purgeUsageEvents(ctx, metricsStore)
 
-	router := api.NewRouter(userStore, hsStore, memStore, metricsStore, embedder, hub, worker, views, pool, rdb)
+	router := api.NewRouter(userStore, hsStore, hiveStore, metricsStore, embedder, hub, worker, views, pool, rdb)
 
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {

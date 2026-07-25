@@ -17,7 +17,7 @@ graph TB
         Router["chi Router\n+ Auth / rate limit / timeout"]
         AuthH["Auth Handler"]
         HSH["Hiveshare Handler"]
-        MemH["Memory Handler\n(search / add / stream)"]
+        MemH["Hive Handler\n(search / add / delete / stream)"]
         MetH["Metrics Handler"]
         Health["GET /health"]
         EmbedW["Embed Worker Pool\n(async)"]
@@ -61,7 +61,7 @@ graph TB
 | Auth | Bearer API key; **SHA-256 at rest**, cleartext only at register | `internal/api/middleware.go`, `store/users.go` |
 | DB pool | pgxpool MaxConns=20, MinConns=4, lifetimes set; `ivfflat.probes=10` AfterConnect | `internal/store/db.go` |
 | Vector search | pgvector **HNSW** cosine | `migrations/002_indexes.sql`, `003_hardening.sql` |
-| Full-text fallback | `plainto_tsquery` + `ts_rank` | `internal/store/memory.go` |
+| Full-text fallback | `plainto_tsquery` + `ts_rank` | `internal/store/memory.go` (HiveStore) |
 | Embedding | **Async** worker pool; HTTP path stores `embedding = NULL` then UPDATE | `internal/embed/worker.go` |
 | Real-time | One Redis sub per hiveshare → fan-out to local SSE clients | `internal/realtime/hub.go` |
 | Views | Redis `INCR`, flush to Postgres every 60s | `internal/store/views.go` |
@@ -93,6 +93,8 @@ All items below were found in the initial review and are **fixed in tree**.
 | 2.13 | `log.Printf` | `slog` |
 | 2.14 | No request timeout | 30s timeout; SSE route excluded |
 | 2.15 | Invite expiry not in SQL | `status='pending' AND expires_at > NOW()` |
+| 2.16 | `memory` renamed to `hive`; table `memory_entries` → `hives` | Migration 005; `source_ref` unique per hiveshare, API auto-suffixes duplicates |
+| 2.17 | Delete ignored errors, left Redis view key, no SSE event | Returns 404 on not-found; cleans Redis key; publishes `hive_deleted`; logs usage event |
 
 **Ops note:** Existing plaintext API keys will not authenticate after the hash change — users must re-register (or accept a fresh invite). Apply migrations through `003_hardening.sql`.
 
@@ -170,10 +172,10 @@ sequenceDiagram
     participant Redis as Redis
     participant Tm as Teammate SSE client
 
-    Claude->>MCP: add_memory {content, source_ref, tool}
-    MCP->>API: POST /api/v1/hiveshares/:id/memory
+    Claude->>MCP: add_hive {content, source_ref, tool}
+    MCP->>API: POST /api/v1/hiveshares/:id/hives
     API->>API: Auth (SHA-256 key lookup)
-    API->>PG: INSERT memory_entries (embedding NULL)
+    API->>PG: INSERT hives (embedding NULL, source_ref unique per hiveshare)
     PG-->>API: entry_id
     API->>Worker: Enqueue(entry_id, content)
     API->>PG: INSERT usage_events {event='add'}
@@ -195,8 +197,8 @@ sequenceDiagram
     participant Embed as Embedding API
     participant PG as PostgreSQL
 
-    Claude->>MCP: search_memory {query: "JWT middleware"}
-    MCP->>API: POST /api/v1/hiveshares/:id/memory/search
+    Claude->>MCP: search_hives {query: "JWT middleware"}
+    MCP->>API: POST /api/v1/hiveshares/:id/hives/search
     API->>Embed: Embed(query)
     alt embedding available
         Embed-->>API: vector[1536]

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/KB-perByte/hiveshare/internal/version"
 )
 
 func main() {
@@ -22,13 +23,14 @@ func main() {
 
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "hshare",
-		Short: "HiveShare — collaborative AI memory CLI",
+		Use:     "hshare",
+		Short:   "HiveShare — collaborative AI memory CLI",
+		Version: version.Commit + " (" + version.BuildTime + ")",
 	}
 	root.AddCommand(
 		authCmd(),
 		hiveshareCmd(),
-		memoryCmd(),
+		hiveCmd(),
 		inviteCmd(),
 		membersCmd(),
 		streamCmd(),
@@ -186,12 +188,12 @@ func hiveshareCmd() *cobra.Command {
 
 // ── Memory ────────────────────────────────────────────────────────────────────
 
-func memoryCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "memory", Short: "Manage memory entries", Aliases: []string{"mem"}}
+func hiveCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "hive", Short: "Manage hives", Aliases: []string{"mem"}}
 
 	add := &cobra.Command{
 		Use:   "add",
-		Short: "Add a memory entry (reads content from stdin or --content)",
+		Short: "Add a hive (reads content from stdin or --content)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := newClient()
 			if err != nil {
@@ -232,7 +234,7 @@ func memoryCmd() *cobra.Command {
 			}
 
 			var result map[string]interface{}
-			err = c.post("/api/v1/hiveshares/"+hsID+"/memory", map[string]interface{}{
+			err = c.post("/api/v1/hiveshares/"+hsID+"/hives", map[string]interface{}{
 				"source_type": sourceType,
 				"source_ref":  sourceRef,
 				"source_url":  sourceURL,
@@ -244,7 +246,7 @@ func memoryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Memory entry added: %s\n", result["id"])
+			fmt.Printf("Hive added: %s\n", result["id"])
 			if s, ok := result["summary"].(string); ok && s != "" {
 				fmt.Printf("Summary: %s\n", s)
 			}
@@ -263,7 +265,7 @@ func memoryCmd() *cobra.Command {
 
 	search := &cobra.Command{
 		Use:   "search <query>",
-		Short: "Search memory entries",
+		Short: "Search hives",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := newClient()
@@ -282,7 +284,7 @@ func memoryCmd() *cobra.Command {
 			sourceType, _ := cmd.Flags().GetString("source-type")
 
 			var result map[string]interface{}
-			if err := c.post("/api/v1/hiveshares/"+hsID+"/memory/search", map[string]interface{}{
+			if err := c.post("/api/v1/hiveshares/"+hsID+"/hives/search", map[string]interface{}{
 				"query":       strings.Join(args, " "),
 				"source_type": sourceType,
 				"limit":       limit,
@@ -312,7 +314,7 @@ func memoryCmd() *cobra.Command {
 
 	list := &cobra.Command{
 		Use:   "list",
-		Short: "List memory entries",
+		Short: "List hives",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := newClient()
 			if err != nil {
@@ -329,7 +331,7 @@ func memoryCmd() *cobra.Command {
 			limit, _ := cmd.Flags().GetInt("limit")
 			sourceType, _ := cmd.Flags().GetString("source-type")
 
-			path := fmt.Sprintf("/api/v1/hiveshares/%s/memory?limit=%d", hsID, limit)
+			path := fmt.Sprintf("/api/v1/hiveshares/%s/hives?limit=%d", hsID, limit)
 			if sourceType != "" {
 				path += "&source_type=" + sourceType
 			}
@@ -485,13 +487,13 @@ func streamCmd() *cobra.Command {
 					if json.Unmarshal([]byte(data), &payload) == nil {
 						ts := time.Now().Format("15:04:05")
 						switch eventType {
-						case "memory_added":
+						case "hive_added":
 							p, _ := payload["payload"].(map[string]interface{})
-							fmt.Printf("[%s] + memory added: %s/%s by %s\n",
+							fmt.Printf("[%s] + hive added: %s/%s by %s\n",
 								ts, p["source_type"], p["source_ref"], p["user_name"])
-						case "memory_updated":
+						case "hive_updated":
 							p, _ := payload["payload"].(map[string]interface{})
-							fmt.Printf("[%s] ~ memory updated: %s/%s\n",
+							fmt.Printf("[%s] ~ hive updated: %s/%s\n",
 								ts, p["source_type"], p["source_ref"])
 						case "connected":
 							fmt.Printf("[%s] connected to stream\n", ts)
@@ -551,7 +553,7 @@ func metricsCmd() *cobra.Command {
 			}
 
 			hs, _ := m["hiveshare"].(map[string]interface{})
-			mem, _ := m["memory"].(map[string]interface{})
+			mem, _ := m["hive"].(map[string]interface{})
 			collab, _ := m["collaboration"].(map[string]interface{})
 			coverage, _ := m["coverage"].(map[string]interface{})
 			activity, _ := m["activity"].(map[string]interface{})
@@ -559,7 +561,7 @@ func metricsCmd() *cobra.Command {
 			fmt.Printf("── %s ────────────────────────────────────\n", hs["name"])
 			fmt.Printf("Members: %.0f\n\n", hs["member_count"])
 
-			fmt.Println("Memory")
+			fmt.Println("Hives")
 			fmt.Printf("  Total entries:    %.0f\n", mem["total_entries"])
 			fmt.Printf("  Unique sources:   %.0f\n", mem["unique_sources"])
 			if bt, ok := mem["by_source_type"].(map[string]interface{}); ok {
