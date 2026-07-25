@@ -182,7 +182,194 @@ func hiveshareCmd() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(create, list, use)
+	cmd.AddCommand(create, list, use, snapshotCmd())
+	return cmd
+}
+
+func snapshotCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "snapshot", Short: "Manage hiveshare snapshots", Aliases: []string{"snap"}}
+
+	create := &cobra.Command{
+		Use:   "create",
+		Short: "Create a snapshot of the current hiveshare",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			cfg := loadConfig()
+			hsID, _ := cmd.Flags().GetString("hiveshare")
+			if hsID == "" {
+				hsID = cfg.DefaultHiveshare
+			}
+			if hsID == "" {
+				return fmt.Errorf("no hiveshare set")
+			}
+			name, _ := cmd.Flags().GetString("name")
+			desc, _ := cmd.Flags().GetString("description")
+			if name == "" {
+				name = "snapshot-" + time.Now().Format("2006-01-02-150405")
+			}
+			var result map[string]interface{}
+			if err := c.post(fmt.Sprintf("/api/v1/hiveshares/%s/snapshots", hsID),
+				map[string]string{"name": name, "description": desc}, &result); err != nil {
+				return err
+			}
+			fmt.Printf("Snapshot created: %s (%.0f entries)\n", result["name"], result["entry_count"])
+			return nil
+		},
+	}
+	create.Flags().String("hiveshare", "", "Hiveshare ID")
+	create.Flags().String("name", "", "Snapshot name (auto-generated if empty)")
+	create.Flags().String("description", "", "Description")
+
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List snapshots for the current hiveshare",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			cfg := loadConfig()
+			hsID, _ := cmd.Flags().GetString("hiveshare")
+			if hsID == "" {
+				hsID = cfg.DefaultHiveshare
+			}
+			if hsID == "" {
+				return fmt.Errorf("no hiveshare set")
+			}
+			var snaps []map[string]interface{}
+			if err := c.get(fmt.Sprintf("/api/v1/hiveshares/%s/snapshots", hsID), &snaps); err != nil {
+				return err
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ID\tNAME\tENTRIES\tCREATED_AT")
+			for _, s := range snaps {
+				t, _ := time.Parse(time.RFC3339Nano, s["created_at"].(string))
+				fmt.Fprintf(w, "%.0f\t%s\t%.0f\t%s\n",
+					s["snapshot_id"], s["name"], s["entry_count"], t.Format("2006-01-02 15:04"))
+			}
+			w.Flush()
+			return nil
+		},
+	}
+	list.Flags().String("hiveshare", "", "Hiveshare ID")
+
+	show := &cobra.Command{
+		Use:   "show <snapshotId>",
+		Short: "Show snapshot details and entry list",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			cfg := loadConfig()
+			hsID, _ := cmd.Flags().GetString("hiveshare")
+			if hsID == "" {
+				hsID = cfg.DefaultHiveshare
+			}
+			if hsID == "" {
+				return fmt.Errorf("no hiveshare set")
+			}
+			var result map[string]interface{}
+			if err := c.get(fmt.Sprintf("/api/v1/hiveshares/%s/snapshots/%s", hsID, args[0]), &result); err != nil {
+				return err
+			}
+			snap, _ := result["snapshot"].(map[string]interface{})
+			fmt.Printf("Snapshot: %s\n", snap["name"])
+			if d, ok := snap["description"].(string); ok && d != "" {
+				fmt.Printf("Description: %s\n", d)
+			}
+			t, _ := time.Parse(time.RFC3339Nano, snap["created_at"].(string))
+			fmt.Printf("Created: %s\n", t.Format("2006-01-02 15:04"))
+			fmt.Printf("Entries: %.0f\n\n", snap["entry_count"])
+
+			entries, _ := result["entries"].([]interface{})
+			if len(entries) > 0 {
+				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(w, "ENTRY_ID\tSOURCE\tREF\tEMBEDDING")
+				for _, e := range entries {
+					entry, _ := e.(map[string]interface{})
+					hasEmb := "no"
+					if b, ok := entry["has_embedding"].(bool); ok && b {
+						hasEmb = "yes"
+					}
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+						entry["entry_id"], entry["source_type"], entry["source_ref"], hasEmb)
+				}
+				w.Flush()
+			}
+			return nil
+		},
+	}
+	show.Flags().String("hiveshare", "", "Hiveshare ID")
+
+	restore := &cobra.Command{
+		Use:   "restore <snapshotId>",
+		Short: "Create a new hiveshare from a snapshot",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			cfg := loadConfig()
+			hsID, _ := cmd.Flags().GetString("hiveshare")
+			if hsID == "" {
+				hsID = cfg.DefaultHiveshare
+			}
+			if hsID == "" {
+				return fmt.Errorf("no hiveshare set")
+			}
+			name, _ := cmd.Flags().GetString("name")
+			var result map[string]interface{}
+			body := map[string]string{}
+			if name != "" {
+				body["name"] = name
+			}
+			if err := c.post(fmt.Sprintf("/api/v1/hiveshares/%s/snapshots/%s/restore", hsID, args[0]),
+				body, &result); err != nil {
+				return err
+			}
+			hs, _ := result["hiveshare"].(map[string]interface{})
+			fmt.Printf("Restored to new hiveshare: %s (%s)\n", hs["name"], hs["id"])
+			fmt.Printf("Entries restored: %.0f\n", result["entries_restored"])
+			fmt.Printf("Run 'hshare hiveshare use %s' to switch to it\n", hs["id"])
+			return nil
+		},
+	}
+	restore.Flags().String("hiveshare", "", "Hiveshare ID")
+	restore.Flags().String("name", "", "Name for the restored hiveshare")
+
+	del := &cobra.Command{
+		Use:   "delete <snapshotId>",
+		Short: "Delete a snapshot",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			cfg := loadConfig()
+			hsID, _ := cmd.Flags().GetString("hiveshare")
+			if hsID == "" {
+				hsID = cfg.DefaultHiveshare
+			}
+			if hsID == "" {
+				return fmt.Errorf("no hiveshare set")
+			}
+			if err := c.delete(fmt.Sprintf("/api/v1/hiveshares/%s/snapshots/%s", hsID, args[0])); err != nil {
+				return err
+			}
+			fmt.Printf("Snapshot %s deleted\n", args[0])
+			return nil
+		},
+	}
+	del.Flags().String("hiveshare", "", "Hiveshare ID")
+
+	cmd.AddCommand(create, list, show, restore, del)
 	return cmd
 }
 
@@ -356,7 +543,151 @@ func hiveCmd() *cobra.Command {
 	list.Flags().IntP("limit", "l", 20, "Max results")
 	list.Flags().StringP("source-type", "t", "", "Filter by source type")
 
-	cmd.AddCommand(add, search, list)
+	history := &cobra.Command{
+		Use:   "history <entryId>",
+		Short: "Show version history for a hive",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			cfg := loadConfig()
+			hsID, _ := cmd.Flags().GetString("hiveshare")
+			if hsID == "" {
+				hsID = cfg.DefaultHiveshare
+			}
+			if hsID == "" {
+				return fmt.Errorf("no hiveshare set")
+			}
+			limit, _ := cmd.Flags().GetInt("limit")
+			path := fmt.Sprintf("/api/v1/hiveshares/%s/hives/%s/history?limit=%d", hsID, args[0], limit)
+			var versions []map[string]interface{}
+			if err := c.get(path, &versions); err != nil {
+				return err
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "VERSION\tACTION\tSUMMARY\tEMBEDDING\tRECORDED_AT")
+			for _, v := range versions {
+				t, _ := time.Parse(time.RFC3339Nano, v["recorded_at"].(string))
+				hasEmb := "no"
+				if b, ok := v["has_embedding"].(bool); ok && b {
+					hasEmb = "yes"
+				}
+				summary, _ := v["summary"].(string)
+				if len(summary) > 40 {
+					summary = summary[:40] + "..."
+				}
+				fmt.Fprintf(w, "%.0f\t%s\t%s\t%s\t%s\n",
+					v["history_id"], v["action"], summary, hasEmb, t.Format("2006-01-02 15:04"))
+			}
+			w.Flush()
+			return nil
+		},
+	}
+	history.Flags().String("hiveshare", "", "Hiveshare ID")
+	history.Flags().IntP("limit", "l", 20, "Max versions")
+
+	rollback := &cobra.Command{
+		Use:   "rollback <entryId>",
+		Short: "Rollback a hive to a prior version",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			cfg := loadConfig()
+			hsID, _ := cmd.Flags().GetString("hiveshare")
+			if hsID == "" {
+				hsID = cfg.DefaultHiveshare
+			}
+			if hsID == "" {
+				return fmt.Errorf("no hiveshare set")
+			}
+			version, _ := cmd.Flags().GetInt64("version")
+			if version == 0 {
+				return fmt.Errorf("--version is required")
+			}
+			var result map[string]interface{}
+			if err := c.post(fmt.Sprintf("/api/v1/hiveshares/%s/hives/%s/rollback", hsID, args[0]),
+				map[string]interface{}{"history_id": version}, &result); err != nil {
+				return err
+			}
+			fmt.Printf("Rolled back entry %s to version %d\n", args[0], version)
+			return nil
+		},
+	}
+	rollback.Flags().String("hiveshare", "", "Hiveshare ID")
+	rollback.Flags().Int64("version", 0, "History version ID to restore")
+	rollback.MarkFlagRequired("version")
+
+	undelete := &cobra.Command{
+		Use:   "undelete",
+		Short: "Restore a deleted hive",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			cfg := loadConfig()
+			hsID, _ := cmd.Flags().GetString("hiveshare")
+			if hsID == "" {
+				hsID = cfg.DefaultHiveshare
+			}
+			if hsID == "" {
+				return fmt.Errorf("no hiveshare set")
+			}
+			version, _ := cmd.Flags().GetInt64("version")
+			if version == 0 {
+				return fmt.Errorf("--version is required")
+			}
+			var result map[string]interface{}
+			if err := c.post(fmt.Sprintf("/api/v1/hiveshares/%s/hives/undelete", hsID),
+				map[string]interface{}{"history_id": version}, &result); err != nil {
+				return err
+			}
+			fmt.Printf("Restored deleted entry: %s\n", result["id"])
+			return nil
+		},
+	}
+	undelete.Flags().String("hiveshare", "", "Hiveshare ID")
+	undelete.Flags().Int64("version", 0, "History version ID of the delete action")
+	undelete.MarkFlagRequired("version")
+
+	copyCmd := &cobra.Command{
+		Use:   "copy",
+		Short: "Copy memory entries to another hiveshare (rollforward merge)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			toHS, _ := cmd.Flags().GetString("to")
+			if toHS == "" {
+				return fmt.Errorf("--to is required")
+			}
+			entriesStr, _ := cmd.Flags().GetString("entries")
+			if entriesStr == "" {
+				return fmt.Errorf("--entries is required")
+			}
+			var entryIDs []string
+			for _, e := range strings.Split(entriesStr, ",") {
+				entryIDs = append(entryIDs, strings.TrimSpace(e))
+			}
+			var result []map[string]interface{}
+			if err := c.post(fmt.Sprintf("/api/v1/hiveshares/%s/hives/copy", toHS),
+				map[string]interface{}{"entry_ids": entryIDs}, &result); err != nil {
+				return err
+			}
+			fmt.Printf("Copied %d entries to hiveshare %s\n", len(result), toHS)
+			return nil
+		},
+	}
+	copyCmd.Flags().String("to", "", "Target hiveshare ID")
+	copyCmd.Flags().String("entries", "", "Comma-separated entry IDs to copy")
+
+	cmd.AddCommand(add, search, list, history, rollback, undelete, copyCmd)
 	return cmd
 }
 

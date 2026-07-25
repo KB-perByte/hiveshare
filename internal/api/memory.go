@@ -6,23 +6,20 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5"
 	"github.com/KB-perByte/hiveshare/internal/embed"
 	"github.com/KB-perByte/hiveshare/internal/models"
 	"github.com/KB-perByte/hiveshare/internal/realtime"
 	"github.com/KB-perByte/hiveshare/internal/store"
 )
 
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
-
 type HiveHandler struct {
 	mem      *store.HiveStore
 	hs       *store.HiveshareStore
 	metrics  *store.MetricsStore
+	history  *store.HistoryStore
 	embedder embed.Embedder
 	hub      *realtime.Hub
 	worker   *embed.Worker
@@ -33,13 +30,14 @@ func NewHiveHandler(
 	mem *store.HiveStore,
 	hs *store.HiveshareStore,
 	metrics *store.MetricsStore,
+	history *store.HistoryStore,
 	embedder embed.Embedder,
 	hub *realtime.Hub,
 	worker *embed.Worker,
 	views *store.ViewCounter,
 ) *HiveHandler {
 	return &HiveHandler{
-		mem: mem, hs: hs, metrics: metrics, embedder: embedder,
+		mem: mem, hs: hs, metrics: metrics, history: history, embedder: embedder,
 		hub: hub, worker: worker, views: views,
 	}
 }
@@ -152,7 +150,7 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			break
 		}
-		if n >= 9 || !isUniqueViolation(err) {
+		if n >= 9 || !store.IsUniqueViolation(err) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -341,4 +339,286 @@ func (h *HiveHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.hub.ServeSSE(w, r, hsID)
+}
+
+// ── Per-entry history ────────────────────────────────────────────────────────
+
+func (h *HiveHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
+	hsID, ok := h.requireAccess(r, w, false)
+	if !ok {
+		return
+	}
+	entryID, err := parseUUID(r, "entryId")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid entry id")
+		return
+	}
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+	versions, err := h.history.ListVersions(r.Context(), entryID, hsID, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if versions == nil {
+		versions = []*models.HistoryEntry{}
+	}
+	writeJSON(w, http.StatusOK, versions)
+}
+
+func (h *HiveHandler) Rollback(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	entryID, err := parseUUID(r, "entryId")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid entry id")
+		return
+	}
+	var req struct {
+		HistoryID int64 `json:"history_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.HistoryID == 0 {
+		writeError(w, http.StatusBadRequest, "history_id is required")
+		return
+	}
+	entry, hasEmb, err := h.history.Rollback(r.Context(), entryID, hsID, req.HistoryID)
+	if err != nil {
+		writeHistoryErr(w, "rollback failed", err)
+		return
+	}
+	if !hasEmb {
+		h.worker.Enqueue(embed.Job{EntryID: entry.ID, Content: entry.Content})
+	}
+	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
+		UserID:      u.ID,
+		HiveshareID: &hsID,
+		EntryID:     &entry.ID,
+		EventType:   "rollback",
+	})
+	_ = h.hub.Publish(r.Context(), models.StreamEvent{
+		Type:        "hive_rolled_back",
+		HiveshareID: hsID,
+		Payload:     entry,
+	})
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func (h *HiveHandler) Undelete(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	var req struct {
+		HistoryID int64 `json:"history_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.HistoryID == 0 {
+		writeError(w, http.StatusBadRequest, "history_id is required")
+		return
+	}
+	entry, hasEmb, err := h.history.Undelete(r.Context(), req.HistoryID, hsID)
+	if err != nil {
+		writeHistoryErr(w, "undelete failed", err)
+		return
+	}
+	if !hasEmb {
+		h.worker.Enqueue(embed.Job{EntryID: entry.ID, Content: entry.Content})
+	}
+	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
+		UserID:      u.ID,
+		HiveshareID: &hsID,
+		EntryID:     &entry.ID,
+		EventType:   "undelete",
+	})
+	_ = h.hub.Publish(r.Context(), models.StreamEvent{
+		Type:        "hive_undeleted",
+		HiveshareID: hsID,
+		Payload:     entry,
+	})
+	writeJSON(w, http.StatusCreated, entry)
+}
+
+// ── Snapshots ────────────────────────────────────────────────────────────────
+
+func (h *HiveHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	var req struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	snap, err := h.history.CreateSnapshot(r.Context(), hsID, u.ID, req.Name, req.Description)
+	if err != nil {
+		if errors.Is(err, store.ErrSnapshotTooLarge) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, snap)
+}
+
+func (h *HiveHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
+	hsID, ok := h.requireAccess(r, w, false)
+	if !ok {
+		return
+	}
+	snaps, err := h.history.ListSnapshots(r.Context(), hsID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if snaps == nil {
+		snaps = []*models.Snapshot{}
+	}
+	writeJSON(w, http.StatusOK, snaps)
+}
+
+func (h *HiveHandler) GetSnapshot(w http.ResponseWriter, r *http.Request) {
+	hsID, ok := h.requireAccess(r, w, false)
+	if !ok {
+		return
+	}
+	snapshotID, err := strconv.ParseInt(chi.URLParam(r, "snapshotId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snapshot id")
+		return
+	}
+	snap, entries, err := h.history.GetSnapshot(r.Context(), snapshotID, hsID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "snapshot not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"snapshot": snap,
+		"entries":  entries,
+	})
+}
+
+func (h *HiveHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	snapshotID, err := strconv.ParseInt(chi.URLParam(r, "snapshotId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snapshot id")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		req.Name = "(restored)"
+	}
+	result, err := h.history.RestoreSnapshot(r.Context(), snapshotID, hsID, u.ID, req.Name)
+	if err != nil {
+		writeHistoryErr(w, "restore failed", err)
+		return
+	}
+	for _, id := range result.NullEmbeddings {
+		entry, getErr := h.mem.Get(r.Context(), id, result.Hiveshare.ID)
+		if getErr == nil {
+			h.worker.Enqueue(embed.Job{EntryID: id, Content: entry.Content})
+		}
+	}
+	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
+		UserID:    u.ID,
+		EventType: "snapshot_restore",
+	})
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"hiveshare":        result.Hiveshare,
+		"entries_restored": result.EntriesCreated,
+	})
+}
+
+func (h *HiveHandler) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	snapshotID, err := strconv.ParseInt(chi.URLParam(r, "snapshotId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid snapshot id")
+		return
+	}
+	deleted, err := h.history.DeleteSnapshot(r.Context(), snapshotID, hsID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !deleted {
+		writeError(w, http.StatusNotFound, "snapshot not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Copy entries ─────────────────────────────────────────────────────────────
+
+func (h *HiveHandler) CopyEntries(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	hsID, ok := h.requireAccess(r, w, true)
+	if !ok {
+		return
+	}
+	var req struct {
+		EntryIDs []uuid.UUID `json:"entry_ids"`
+	}
+	if err := decodeJSON(r, &req); err != nil || len(req.EntryIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "entry_ids is required")
+		return
+	}
+	results, err := h.history.CopyEntries(r.Context(), hsID, u.ID, req.EntryIDs)
+	if err != nil {
+		if errors.Is(err, store.ErrForbidden) {
+			writeError(w, http.StatusForbidden, "not a member of source hiveshare")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var entries []*models.Hive
+	for _, cr := range results {
+		entries = append(entries, cr.Entry)
+		if !cr.HasEmbedding {
+			h.worker.Enqueue(embed.Job{EntryID: cr.Entry.ID, Content: cr.Entry.Content})
+		}
+	}
+	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
+		UserID:      u.ID,
+		HiveshareID: &hsID,
+		EventType:   "copy",
+	})
+	writeJSON(w, http.StatusCreated, entries)
+}
+
+// writeHistoryErr maps pgx.ErrNoRows → 404 and everything else → 500.
+func writeHistoryErr(w http.ResponseWriter, prefix string, err error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, prefix+": not found")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, prefix+": "+err.Error())
 }

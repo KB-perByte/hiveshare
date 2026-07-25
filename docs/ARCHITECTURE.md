@@ -106,10 +106,10 @@ All items below were found in the initial review and are **fixed in tree**.
 
 ```mermaid
 graph LR
-    A["Add memory\nPOST /memory"] -->|"enqueue"| B["Embed Worker"]
+    A["Add memory\nPOST /hives"] -->|"enqueue"| B["Embed Worker"]
     A -->|"fast INSERT\nembedding=NULL"| C["PostgreSQL"]
     B -->|"async UPDATE"| C
-    D["Search\nPOST /memory/search"] -->|"embed query"| E["Embedding API"]
+    D["Search\nPOST /hives/search"] -->|"embed query"| E["Embedding API"]
     D -->|"HNSW scan"| C
     F["SSE Stream"] -->|"1 sub/hiveshare"| G["Redis"]
     H["Get memory"] -->|"INCR views"| G

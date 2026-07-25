@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -58,13 +59,22 @@ func main() {
 	views := store.NewViewCounter(rdb, pool)
 	views.StartFlusher(ctx, 60*time.Second)
 
+	historyStore := store.NewHistoryStore(pool)
+
 	worker := embed.NewWorker(embedder, hiveStore, 2, 64)
 	worker.Start(ctx, 2)
 
 	// rolling TTL for usage_events (retain 90 days)
 	go purgeUsageEvents(ctx, metricsStore)
 
-	router := api.NewRouter(userStore, hsStore, hiveStore, metricsStore, embedder, hub, worker, views, pool, rdb)
+	// optional history purge
+	historyTTLDays := envInt("HISTORY_TTL_DAYS", 0)
+	historyMaxVersions := envInt("HISTORY_MAX_VERSIONS", 0)
+	if historyTTLDays > 0 || historyMaxVersions > 0 {
+		go purgeHistory(ctx, historyStore, historyTTLDays, historyMaxVersions)
+	}
+
+	router := api.NewRouter(userStore, hsStore, hiveStore, metricsStore, historyStore, embedder, hub, worker, views, pool, rdb)
 
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
@@ -96,6 +106,47 @@ func main() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
+}
+
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func purgeHistory(ctx context.Context, hs *store.HistoryStore, ttlDays, maxVersions int) {
+	run := func() {
+		if ttlDays > 0 {
+			n, err := hs.PurgeByAge(ctx, time.Duration(ttlDays)*24*time.Hour)
+			if err != nil {
+				slog.Warn("history age purge failed", "err", err)
+			} else if n > 0 {
+				slog.Info("history purged by age", "rows", n)
+			}
+		}
+		if maxVersions > 0 {
+			n, err := hs.PurgeByCount(ctx, maxVersions)
+			if err != nil {
+				slog.Warn("history count purge failed", "err", err)
+			} else if n > 0 {
+				slog.Info("history purged by count", "rows", n)
+			}
+		}
+	}
+	run()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
 }
 
 func purgeUsageEvents(ctx context.Context, metrics *store.MetricsStore) {

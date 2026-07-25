@@ -17,6 +17,10 @@ coverage.out
 # Private demo / ops notes (hostnames, keys, personal runbooks)
 docs/demo-hiveshare.md
 
+# Python
+__pycache__/
+*.pyc
+
 # IDE
 .idea/
 .vscode/

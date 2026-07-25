@@ -1,4 +1,5 @@
-.PHONY: all build server mcp cli deps migrate dev clean docker-up docker-down release server-linux
+.PHONY: all build server mcp cli deps migrate dev dev-clean clean docker-up docker-down release server-linux \
+       smoke-test smoke-test-full integration-test psql
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
@@ -8,6 +9,7 @@ BUILDTIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 VERSION_LDFLAGS := -X github.com/KB-perByte/hiveshare/internal/version.Commit=$(COMMIT) \
 	-X github.com/KB-perByte/hiveshare/internal/version.BuildTime=$(BUILDTIME)
 GOFLAGS := -ldflags="-s -w $(VERSION_LDFLAGS)"
+CONTAINER_RUNTIME ?= docker
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 
@@ -36,13 +38,26 @@ deps:
 # ── Database ─────────────────────────────────────────────────────────────────
 
 POSTGRES_URL ?= postgres://hiveshare:hiveshare@localhost:5432/hiveshare?sslmode=disable
+# Compose service name (stable across project prefixes / renamed containers).
+POSTGRES_SERVICE ?= postgres
 
 migrate:
 	@echo "Applying migrations..."
-	@for f in migrations/*.sql; do \
-	    echo "  Running $$f..."; \
-	    psql "$(POSTGRES_URL)" -f "$$f"; \
-	done
+	@if command -v psql >/dev/null 2>&1; then \
+	    for f in migrations/*.sql; do \
+	        echo "  Running $$f..."; \
+	        psql "$(POSTGRES_URL)" -f "$$f"; \
+	    done; \
+	elif $(CONTAINER_RUNTIME) compose ps --status running $(POSTGRES_SERVICE) >/dev/null 2>&1; then \
+	    for f in migrations/*.sql; do \
+	        echo "  Running $$f (via compose $(POSTGRES_SERVICE))..."; \
+	        $(CONTAINER_RUNTIME) compose exec -T $(POSTGRES_SERVICE) \
+	            psql -U hiveshare -d hiveshare -f - < "$$f"; \
+	    done; \
+	else \
+	    echo "Error: psql not found and compose service '$(POSTGRES_SERVICE)' is not running"; \
+	    exit 1; \
+	fi
 	@echo "Migrations done."
 
 # ── Dev ───────────────────────────────────────────────────────────────────────
@@ -55,11 +70,18 @@ dev: docker-up
 	EMBED_PROVIDER= go run ./cmd/server
 
 docker-up:
-	docker compose up -d
+	$(CONTAINER_RUNTIME) compose up -d
 
 docker-down:
-	docker compose down
+	$(CONTAINER_RUNTIME) compose down
 
+dev-clean:
+	$(CONTAINER_RUNTIME) compose down -v
+
+psql:
+	@echo "**INFO**: Opening psql via '$(CONTAINER_RUNTIME) compose exec $(POSTGRES_SERVICE)'"
+	$(CONTAINER_RUNTIME) compose exec -it $(POSTGRES_SERVICE) psql -U hiveshare -d hiveshare
+	
 # ── Install CLI ───────────────────────────────────────────────────────────────
 
 install: cli
@@ -93,6 +115,19 @@ release:
 	done
 	@echo "Done. Tarballs in dist/"
 
+# ── Test ──────────────────────────────────────────────────────────────────────
+
+HIVESHARE_TEST_URL ?= $(or $(BASE_URL),http://localhost:8080)
+
+smoke-test:
+	@./scripts/smoke-test.sh $(HIVESHARE_TEST_URL)
+
+smoke-test-full:
+	@./scripts/smoke-test-full.sh $(HIVESHARE_TEST_URL)
+
+integration-test:
+	HIVESHARE_TEST_URL=$(HIVESHARE_TEST_URL) pytest tests/ -v
+
 # ── Clean ─────────────────────────────────────────────────────────────────────
 
 clean:
@@ -114,5 +149,10 @@ help:
 	@echo "  make install-mcp    Install hiveshare-mcp to /usr/local/bin"
 	@echo "  make docker-up      Start postgres + redis"
 	@echo "  make docker-down    Stop postgres + redis"
+	@echo "  make dev-clean      Stop containers and wipe database volume"
+	@echo "  make psql           Open psql shell in the running postgres container"
+	@echo "  make smoke-test     Basic connectivity check (no user needed)"
+	@echo "  make smoke-test-full  Full endpoint smoke test (curl + jq)"
+	@echo "  make integration-test  Pytest integration tests"
 	@echo "  make release        Cross-compile all platforms → dist/"
 	@echo "  make clean          Remove ./bin/ and dist/"

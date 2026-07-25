@@ -29,6 +29,7 @@ func NewRouter(
 	hsStore *store.HiveshareStore,
 	hiveStore *store.HiveStore,
 	metricsStore *store.MetricsStore,
+	historyStore *store.HistoryStore,
 	embedder embed.Embedder,
 	hub *realtime.Hub,
 	worker *embed.Worker,
@@ -59,7 +60,7 @@ func NewRouter(
 
 	auth := NewAuthHandler(userStore)
 	hs := NewHiveshareHandler(hsStore, metricsStore)
-	hive := NewHiveHandler(hiveStore, hsStore, metricsStore, embedder, hub, worker, views)
+	hive := NewHiveHandler(hiveStore, hsStore, metricsStore, historyStore, embedder, hub, worker, views)
 	met := NewMetricsHandler(metricsStore)
 
 	r.Get("/health", healthHandler(pool, rdb))
@@ -94,6 +95,16 @@ func NewRouter(
 				r.Put("/hiveshares/{id}/hives/{entryId}", hive.Update)
 				r.Delete("/hiveshares/{id}/hives/{entryId}", hive.Delete)
 				r.Post("/hiveshares/{id}/hives/search", hive.Search)
+				r.Get("/hiveshares/{id}/hives/{entryId}/history", hive.ListHistory)
+				r.Post("/hiveshares/{id}/hives/{entryId}/rollback", hive.Rollback)
+				r.Post("/hiveshares/{id}/hives/undelete", hive.Undelete)
+				r.Post("/hiveshares/{id}/hives/copy", hive.CopyEntries)
+
+				r.Post("/hiveshares/{id}/snapshots", hive.CreateSnapshot)
+				r.Get("/hiveshares/{id}/snapshots", hive.ListSnapshots)
+				r.Get("/hiveshares/{id}/snapshots/{snapshotId}", hive.GetSnapshot)
+				r.Post("/hiveshares/{id}/snapshots/{snapshotId}/restore", hive.RestoreSnapshot)
+				r.Delete("/hiveshares/{id}/snapshots/{snapshotId}", hive.DeleteSnapshot)
 
 				r.Get("/hiveshares/{id}/metrics", hs.Metrics)
 				r.Get("/metrics/me", met.UserMetrics)
