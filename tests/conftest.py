@@ -61,9 +61,9 @@ def hiveshare_id(api_url, user_a):
 
 
 @pytest.fixture(scope="session")
-def memory_entry(api_url, user_a, hiveshare_id):
-    """Create a memory entry in the test hiveshare."""
-    resp = requests.post(f"{api_url}/hiveshares/{hiveshare_id}/memory", timeout=10, json={
+def hive_entry(api_url, user_a, hiveshare_id):
+    """Create a hive in the test hiveshare."""
+    resp = requests.post(f"{api_url}/hiveshares/{hiveshare_id}/hives", timeout=10, json={
         "source_type": "manual",
         "source_ref": "test-entry-1",
         "content": "Original content for testing history",

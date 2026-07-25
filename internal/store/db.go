@@ -1,3 +1,6 @@
+// Package store provides PostgreSQL-backed persistence for all hiveshare domain
+// objects. Each Store type is constructed with a pgxpool.Pool and is safe for
+// concurrent use.
 package store
 
 import (
@@ -10,6 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// NewPool opens and validates a connection pool using DATABASE_URL or individual
+// POSTGRES_* environment variables. Returns a ready-to-use pool or an error if
+// the database is unreachable.
 func NewPool(ctx context.Context) (*pgxpool.Pool, error) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {

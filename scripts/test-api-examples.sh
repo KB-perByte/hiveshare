@@ -152,21 +152,21 @@ MC=$(jq 'length' "$TMPDIR/members.json")
 # ── Memory: Create ────────────────────────────────────────────────────────────
 section "Memory: Create"
 
-CODE=$(curl -s -o "$TMPDIR/mem_create.json" -w "%{http_code}" -X POST "$API/hiveshares/$HS_ID/memory" \
+CODE=$(curl -s -o "$TMPDIR/mem_create.json" -w "%{http_code}" -X POST "$API/hiveshares/$HS_ID/hives" \
   -H "$AUTH_A" -H "Content-Type: application/json" \
   -d '{"source_type":"jira","source_ref":"PROJ-123","content":"Analysis of auth refactor","tool":"claude","tags":["auth"]}')
-check_code "$CODE" "201" "POST /hiveshares/{id}/memory"
+check_code "$CODE" "201" "POST /hiveshares/{id}/hives"
 ENTRY_ID=$(jq -r '.id' "$TMPDIR/mem_create.json")
 [ "$(jq -r '.source_type' "$TMPDIR/mem_create.json")" = "jira" ] && ok "source_type" || fail "wrong source_type"
 [ "$(jq -r '.source_ref' "$TMPDIR/mem_create.json")" = "PROJ-123" ] && ok "source_ref" || fail "wrong source_ref"
 [ "$(jq -r '.tool' "$TMPDIR/mem_create.json")" = "claude" ] && ok "tool" || fail "wrong tool"
 
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/hiveshares/$HS_ID/memory" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/hiveshares/$HS_ID/hives" \
   -H "$AUTH_A" -H "Content-Type: application/json" \
   -d '{"content":"no source"}')
 check_code "$CODE" "400" "missing fields returns 400"
 
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/hiveshares/$HS_ID/memory" \
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/hiveshares/$HS_ID/hives" \
   -H "$AUTH_B" -H "Content-Type: application/json" \
   -d '{"source_type":"manual","source_ref":"x","content":"x","tool":"manual"}')
 check_code "$CODE" "403" "view-only cannot write"
@@ -175,16 +175,16 @@ check_code "$CODE" "403" "view-only cannot write"
 section "Memory: List"
 
 CODE=$(curl -s -o "$TMPDIR/mem_list.json" -w "%{http_code}" \
-  "$API/hiveshares/$HS_ID/memory?source_type=jira&limit=10" -H "$AUTH_A")
-check_code "$CODE" "200" "GET /hiveshares/{id}/memory"
+  "$API/hiveshares/$HS_ID/hives?source_type=jira&limit=10" -H "$AUTH_A")
+check_code "$CODE" "200" "GET /hiveshares/{id}/hives"
 [ "$(jq 'length' "$TMPDIR/mem_list.json")" -ge 1 ] && ok "has entries" || fail "empty list"
 
 # ── Memory: Get ───────────────────────────────────────────────────────────────
 section "Memory: Get"
 
 CODE=$(curl -s -o "$TMPDIR/mem_get.json" -w "%{http_code}" \
-  "$API/hiveshares/$HS_ID/memory/$ENTRY_ID" -H "$AUTH_A")
-check_code "$CODE" "200" "GET /hiveshares/{id}/memory/{entryId}"
+  "$API/hiveshares/$HS_ID/hives/$ENTRY_ID" -H "$AUTH_A")
+check_code "$CODE" "200" "GET /hiveshares/{id}/hives/{entryId}"
 [ "$(jq -r '.id' "$TMPDIR/mem_get.json")" = "$ENTRY_ID" ] && ok "id matches" || fail "id mismatch"
 jq -e '.content' "$TMPDIR/mem_get.json" > /dev/null && ok "has content" || fail "missing content"
 
@@ -192,26 +192,26 @@ jq -e '.content' "$TMPDIR/mem_get.json" > /dev/null && ok "has content" || fail 
 section "Memory: Update"
 
 CODE=$(curl -s -o "$TMPDIR/mem_upd.json" -w "%{http_code}" -X PUT \
-  "$API/hiveshares/$HS_ID/memory/$ENTRY_ID" \
+  "$API/hiveshares/$HS_ID/hives/$ENTRY_ID" \
   -H "$AUTH_A" -H "Content-Type: application/json" \
   -d '{"content":"Updated analysis...","tags":["auth","updated"]}')
-check_code "$CODE" "200" "PUT /hiveshares/{id}/memory/{entryId}"
+check_code "$CODE" "200" "PUT /hiveshares/{id}/hives/{entryId}"
 [ "$(jq -r '.content' "$TMPDIR/mem_upd.json")" = "Updated analysis..." ] && ok "content updated" || fail "content not updated"
 
 # ── Memory: Search ────────────────────────────────────────────────────────────
 section "Memory: Search"
 
 CODE=$(curl -s -o "$TMPDIR/search.json" -w "%{http_code}" -X POST \
-  "$API/hiveshares/$HS_ID/memory/search" \
+  "$API/hiveshares/$HS_ID/hives/search" \
   -H "$AUTH_A" -H "Content-Type: application/json" \
   -d '{"query":"auth refactor","limit":5}')
-check_code "$CODE" "200" "POST /hiveshares/{id}/memory/search"
+check_code "$CODE" "200" "POST /hiveshares/{id}/hives/search"
 jq -e '.results' "$TMPDIR/search.json" > /dev/null && ok "has results" || fail "missing results"
 jq -e '.count' "$TMPDIR/search.json" > /dev/null && ok "has count" || fail "missing count"
 jq -e '.query' "$TMPDIR/search.json" > /dev/null && ok "has query" || fail "missing query"
 
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-  "$API/hiveshares/$HS_ID/memory/search" \
+  "$API/hiveshares/$HS_ID/hives/search" \
   -H "$AUTH_A" -H "Content-Type: application/json" -d '{"limit":5}')
 check_code "$CODE" "400" "search missing query returns 400"
 
@@ -219,8 +219,8 @@ check_code "$CODE" "400" "search missing query returns 400"
 section "History: List"
 
 CODE=$(curl -s -o "$TMPDIR/hist.json" -w "%{http_code}" \
-  "$API/hiveshares/$HS_ID/memory/$ENTRY_ID/history?limit=10" -H "$AUTH_A")
-check_code "$CODE" "200" "GET /memory/{entryId}/history"
+  "$API/hiveshares/$HS_ID/hives/$ENTRY_ID/history?limit=10" -H "$AUTH_A")
+check_code "$CODE" "200" "GET /hives/{entryId}/history"
 HIST_LEN=$(jq 'length' "$TMPDIR/hist.json")
 [ "$HIST_LEN" -ge 1 ] && ok "$HIST_LEN versions" || fail "no history"
 HIST_ID=$(jq '.[- 1].history_id' "$TMPDIR/hist.json")
@@ -231,33 +231,33 @@ jq -e '.[0] | has("has_embedding")' "$TMPDIR/hist.json" > /dev/null && ok "has h
 section "History: Rollback"
 
 CODE=$(curl -s -o "$TMPDIR/rollback.json" -w "%{http_code}" -X POST \
-  "$API/hiveshares/$HS_ID/memory/$ENTRY_ID/rollback" \
+  "$API/hiveshares/$HS_ID/hives/$ENTRY_ID/rollback" \
   -H "$AUTH_A" -H "Content-Type: application/json" \
   -d "{\"history_id\":$HIST_ID}")
-check_code "$CODE" "200" "POST /memory/{entryId}/rollback"
+check_code "$CODE" "200" "POST /hives/{entryId}/rollback"
 [ "$(jq -r '.content' "$TMPDIR/rollback.json")" = "Analysis of auth refactor" ] && ok "content restored" || fail "content not restored"
 
 # ── History: Delete + Undelete ────────────────────────────────────────────────
 section "History: Undelete"
 
-ENTRY2=$(curl -s -X POST "$API/hiveshares/$HS_ID/memory" \
+ENTRY2=$(curl -s -X POST "$API/hiveshares/$HS_ID/hives" \
   -H "$AUTH_A" -H "Content-Type: application/json" \
   -d '{"source_type":"manual","source_ref":"del-test","content":"Delete me","tool":"manual","tags":[]}')
 ENTRY2_ID=$(echo "$ENTRY2" | jq -r '.id')
 
-curl -s -X DELETE "$API/hiveshares/$HS_ID/memory/$ENTRY2_ID" -H "$AUTH_A" > /dev/null
+curl -s -X DELETE "$API/hiveshares/$HS_ID/hives/$ENTRY2_ID" -H "$AUTH_A" > /dev/null
 
-CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/hiveshares/$HS_ID/memory/$ENTRY2_ID" -H "$AUTH_A")
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/hiveshares/$HS_ID/hives/$ENTRY2_ID" -H "$AUTH_A")
 check_code "$CODE" "404" "deleted entry returns 404"
 
-DEL_HIST=$(curl -s "$API/hiveshares/$HS_ID/memory/$ENTRY2_ID/history" -H "$AUTH_A")
+DEL_HIST=$(curl -s "$API/hiveshares/$HS_ID/hives/$ENTRY2_ID/history" -H "$AUTH_A")
 DEL_HIST_ID=$(echo "$DEL_HIST" | jq '[.[] | select(.action=="delete")][0].history_id')
 
 CODE=$(curl -s -o "$TMPDIR/undel.json" -w "%{http_code}" -X POST \
-  "$API/hiveshares/$HS_ID/memory/undelete" \
+  "$API/hiveshares/$HS_ID/hives/undelete" \
   -H "$AUTH_A" -H "Content-Type: application/json" \
   -d "{\"history_id\":$DEL_HIST_ID}")
-check_code "$CODE" "201" "POST /memory/undelete"
+check_code "$CODE" "201" "POST /hives/undelete"
 [ "$(jq -r '.id' "$TMPDIR/undel.json")" = "$ENTRY2_ID" ] && ok "same id" || fail "id mismatch"
 [ "$(jq -r '.content' "$TMPDIR/undel.json")" = "Delete me" ] && ok "content restored" || fail "content mismatch"
 
@@ -315,10 +315,10 @@ check_code "$CODE" "204" "DELETE /snapshots/{snapshotId}"
 section "Memory: Copy"
 
 CODE=$(curl -s -o "$TMPDIR/copy.json" -w "%{http_code}" -X POST \
-  "$API/hiveshares/$NEW_HS_ID/memory/copy" \
+  "$API/hiveshares/$NEW_HS_ID/hives/copy" \
   -H "$AUTH_A" -H "Content-Type: application/json" \
   -d "{\"entry_ids\":[\"$ENTRY_ID\"]}")
-check_code "$CODE" "201" "POST /hiveshares/{id}/memory/copy"
+check_code "$CODE" "201" "POST /hiveshares/{id}/hives/copy"
 [ "$(jq 'length' "$TMPDIR/copy.json")" = "1" ] && ok "copied 1 entry" || fail "wrong count"
 [ "$(jq -r '.[0].hiveshare_id' "$TMPDIR/copy.json")" = "$NEW_HS_ID" ] && ok "in target hiveshare" || fail "wrong hiveshare"
 
@@ -326,8 +326,8 @@ check_code "$CODE" "201" "POST /hiveshares/{id}/memory/copy"
 section "Memory: Delete"
 
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-  "$API/hiveshares/$HS_ID/memory/$ENTRY2_ID" -H "$AUTH_A")
-check_code "$CODE" "204" "DELETE /hiveshares/{id}/memory/{entryId}"
+  "$API/hiveshares/$HS_ID/hives/$ENTRY2_ID" -H "$AUTH_A")
+check_code "$CODE" "204" "DELETE /hiveshares/{id}/hives/{entryId}"
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
 section "Metrics"

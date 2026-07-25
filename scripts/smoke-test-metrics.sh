@@ -14,7 +14,7 @@ HS=$(curl -sf -X POST "$SMOKE_BASE/hiveshares" \
     -d '{"name":"metrics-test"}')
 HS_ID=$(echo "$HS" | jq -r '.id')
 
-curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/memory" \
+curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives" \
     -H "$AUTH" -H "Content-Type: application/json" \
     -d '{"source_type":"jira","source_ref":"MET-1","content":"For metrics","tool":"claude","tags":[]}' > /dev/null
 

@@ -17,13 +17,13 @@ HS_ID=$(echo "$HS" | jq -r '.id')
 # ── Create + verify history ───────────────────────────────────────────────────
 smoke_section "Entry history"
 
-ENTRY=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/memory" \
+ENTRY=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives" \
     -H "$AUTH" -H "Content-Type: application/json" \
     -d '{"source_type":"manual","source_ref":"hist-1","content":"Original content","tool":"manual","tags":["test"]}')
 ENTRY_ID=$(echo "$ENTRY" | jq -r '.id')
 smoke_ok "created entry"
 
-HIST=$(curl -sf "$SMOKE_BASE/hiveshares/$HS_ID/memory/$ENTRY_ID/history" -H "$AUTH")
+HIST=$(curl -sf "$SMOKE_BASE/hiveshares/$HS_ID/hives/$ENTRY_ID/history" -H "$AUTH")
 HIST_LEN=$(echo "$HIST" | jq 'length')
 [ "$HIST_LEN" -ge 1 ] && smoke_ok "history has $HIST_LEN versions" || smoke_fail "no history"
 INSERT_COUNT=$(echo "$HIST" | jq '[.[] | select(.action=="insert")] | length')
@@ -33,18 +33,18 @@ smoke_check "$LAST_ACTION" "insert" "last history action is insert"
 HIST_ID=$(echo "$HIST" | jq '.[0].history_id')
 
 # ── Update + verify history ───────────────────────────────────────────────────
-curl -sf -X PUT "$SMOKE_BASE/hiveshares/$HS_ID/memory/$ENTRY_ID" \
+curl -sf -X PUT "$SMOKE_BASE/hiveshares/$HS_ID/hives/$ENTRY_ID" \
     -H "$AUTH" -H "Content-Type: application/json" \
     -d '{"content":"Updated content","summary":"updated","tags":["updated"]}' > /dev/null
 
-HIST2=$(curl -sf "$SMOKE_BASE/hiveshares/$HS_ID/memory/$ENTRY_ID/history" -H "$AUTH")
+HIST2=$(curl -sf "$SMOKE_BASE/hiveshares/$HS_ID/hives/$ENTRY_ID/history" -H "$AUTH")
 UPDATE_COUNT=$(echo "$HIST2" | jq '[.[] | select(.action=="update")] | length')
 [ "$UPDATE_COUNT" -ge 1 ] && smoke_ok "update history row exists" || smoke_fail "no update history"
 
 # ── Rollback ──────────────────────────────────────────────────────────────────
 smoke_section "Rollback"
 
-ROLLED=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/memory/$ENTRY_ID/rollback" \
+ROLLED=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives/$ENTRY_ID/rollback" \
     -H "$AUTH" -H "Content-Type: application/json" \
     -d "{\"history_id\":$HIST_ID}")
 ROLL_CONTENT=$(echo "$ROLLED" | jq -r '.content')
@@ -53,23 +53,23 @@ smoke_check "$ROLL_CONTENT" "Original content" "rollback restored original"
 # ── Delete + Undelete ─────────────────────────────────────────────────────────
 smoke_section "Delete + Undelete"
 
-ENTRY2=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/memory" \
+ENTRY2=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives" \
     -H "$AUTH" -H "Content-Type: application/json" \
     -d '{"source_type":"manual","source_ref":"del-test","content":"Delete me","tool":"manual","tags":[]}')
 ENTRY2_ID=$(echo "$ENTRY2" | jq -r '.id')
 
-curl -sf -X DELETE "$SMOKE_BASE/hiveshares/$HS_ID/memory/$ENTRY2_ID" -H "$AUTH" > /dev/null
+curl -sf -X DELETE "$SMOKE_BASE/hiveshares/$HS_ID/hives/$ENTRY2_ID" -H "$AUTH" > /dev/null
 smoke_ok "deleted entry"
 
 GET_AFTER_DEL=$(curl -s -o /dev/null -w "%{http_code}" \
-    "$SMOKE_BASE/hiveshares/$HS_ID/memory/$ENTRY2_ID" -H "$AUTH")
+    "$SMOKE_BASE/hiveshares/$HS_ID/hives/$ENTRY2_ID" -H "$AUTH")
 smoke_check "$GET_AFTER_DEL" "404" "deleted entry returns 404"
 
-DEL_HIST=$(curl -sf "$SMOKE_BASE/hiveshares/$HS_ID/memory/$ENTRY2_ID/history" -H "$AUTH")
+DEL_HIST=$(curl -sf "$SMOKE_BASE/hiveshares/$HS_ID/hives/$ENTRY2_ID/history" -H "$AUTH")
 DEL_HIST_ID=$(echo "$DEL_HIST" | jq '[.[] | select(.action=="delete")][0].history_id')
 [ "$DEL_HIST_ID" != "null" ] && smoke_ok "delete history row found" || smoke_fail "no delete history"
 
-UNDEL_CODE=$(curl -s -o $SMOKE_TMPDIR/hist_undel.json -w "%{http_code}" -X POST "$SMOKE_BASE/hiveshares/$HS_ID/memory/undelete" \
+UNDEL_CODE=$(curl -s -o $SMOKE_TMPDIR/hist_undel.json -w "%{http_code}" -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives/undelete" \
     -H "$AUTH" -H "Content-Type: application/json" \
     -d "{\"history_id\":$DEL_HIST_ID}")
 UNDEL=$(cat $SMOKE_TMPDIR/hist_undel.json)
@@ -127,7 +127,7 @@ COPY_HS=$(curl -sf -X POST "$SMOKE_BASE/hiveshares" \
 COPY_HS_ID=$(echo "$COPY_HS" | jq -r '.id')
 
 COPY_CODE=$(curl -s -o "$SMOKE_TMPDIR/hist_copy.json" -w "%{http_code}" -X POST \
-    "$SMOKE_BASE/hiveshares/$COPY_HS_ID/memory/copy" \
+    "$SMOKE_BASE/hiveshares/$COPY_HS_ID/hives/copy" \
     -H "$AUTH" -H "Content-Type: application/json" \
     -d "{\"entry_ids\":[\"$ENTRY_ID\"]}")
 COPIED=$(cat "$SMOKE_TMPDIR/hist_copy.json")

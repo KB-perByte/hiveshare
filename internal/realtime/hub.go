@@ -1,3 +1,6 @@
+// Package realtime manages Server-Sent Event (SSE) connections and fans out
+// events from Redis pub/sub to connected clients. One Redis subscription is
+// held per active hiveshare; local SSE clients share it.
 package realtime
 
 import (
@@ -31,6 +34,7 @@ type hiveshareSub struct {
 	sub    *redis.PubSub
 }
 
+// NewHub returns a Hub backed by the given Redis client.
 func NewHub(rdb *redis.Client) *Hub {
 	return &Hub{
 		rdb:     rdb,

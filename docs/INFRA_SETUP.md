@@ -81,7 +81,7 @@ OPENAI_API_KEY=sk-... \
 ./bin/hshare auth register \
   --server https://abc123.ngrok-free.app \
   --email you@example.com \
-  --name "Alice"
+  --name "Maverick"
 # saves hvs_... key to ~/.config/hiveshare/config.json
 
 ./bin/hshare headspace create "Sprint 42"
@@ -97,18 +97,18 @@ OPENAI_API_KEY=sk-... \
 #   Invite link: https://abc123.ngrok-free.app/api/v1/invitations/<token>/accept
 ```
 
-Send Bob the link. He accepts it with curl or a browser:
+Send Rooster the link. He accepts it with curl or a browser:
 
 ```bash
 curl -X POST https://abc123.ngrok-free.app/api/v1/invitations/<token>/accept \
   -H "Content-Type: application/json" \
-  -d '{"name": "Bob"}'
-# Returns Bob's hvs_ api_key (save it — only returned once; server stores SHA-256)
+  -d '{"name": "Rooster"}'
+# Returns Rooster's hvs_ api_key (save it — only returned once; server stores SHA-256)
 ```
 
-### Step 6 — Bob configures his client
+### Step 6 — Rooster configures his client
 
-Bob saves his config:
+Rooster saves his config:
 
 ```bash
 mkdir -p ~/.config/hiveshare
@@ -123,12 +123,12 @@ EOF
 
 ### Step 7 — Test live collaboration
 
-**Alice's terminal** (keep running):
+**Maverick's terminal** (keep running):
 ```bash
 ./bin/hshare stream
 ```
 
-**Bob's terminal:**
+**Rooster's terminal:**
 ```bash
 echo "PROJ-42: JWT middleware skips validation on /internal/* routes." | \
   ./bin/hshare memory add \
@@ -137,12 +137,12 @@ echo "PROJ-42: JWT middleware skips validation on /internal/* routes." | \
     --tool claude
 ```
 
-Alice's stream immediately shows:
+Maverick's stream immediately shows:
 ```
-[14:23:01] + memory added: jira/PROJ-42 by Bob
+[14:23:01] + memory added: jira/PROJ-42 by Rooster
 ```
 
-**Alice searches Bob's memory:**
+**Maverick searches Rooster's memory:**
 ```bash
 ./bin/hshare memory search "JWT validation"
 ```
@@ -340,7 +340,7 @@ sudo systemctl reload nginx
 ./bin/hshare auth register \
   --server https://hiveshare.yourdomain.com \
   --email you@example.com \
-  --name "Alice"
+  --name "Maverick"
 
 ./bin/hshare headspace create "Sprint 42"
 ./bin/hshare headspace use <uuid>
@@ -349,7 +349,7 @@ sudo systemctl reload nginx
 # → prints invite link using https://hiveshare.yourdomain.com/...
 ```
 
-Bob accepts the link, gets his key, and follows the same config step as in Option A (pointing to `https://hiveshare.yourdomain.com`).
+Rooster accepts the link, gets his key, and follows the same config step as in Option A (pointing to `https://hiveshare.yourdomain.com`).
 
 ### EC2 security checklist
 
@@ -493,7 +493,7 @@ BASE_URL=https://hiveshare-hiveshare.apps.YOUR_CLUSTER_DOMAIN
 ./bin/hshare auth register \
   --server $BASE_URL \
   --email you@example.com \
-  --name "Alice"
+  --name "Maverick"
 
 ./bin/hshare headspace create "Sprint 42"
 ./bin/hshare headspace use <uuid>
@@ -501,7 +501,7 @@ BASE_URL=https://hiveshare-hiveshare.apps.YOUR_CLUSTER_DOMAIN
 ./bin/hshare invite bob@example.com
 ```
 
-Bob accepts the invite link and configures his client with:
+Rooster accepts the invite link and configures his client with:
 ```bash
 mkdir -p ~/.config/hiveshare
 cat > ~/.config/hiveshare/config.json << EOF
@@ -576,13 +576,13 @@ Verify in Claude: `"List my hiveshares"` — Claude should call `list_hiveshares
 
 ```
 [ ] curl https://YOUR_URL/api/v1/auth/whoami  →  401 (server is up, auth works)
-[ ] Alice registers  →  gets hvs_ key
-[ ] Alice creates hiveshare, sets default
-[ ] Alice invites Bob  →  link contains the server URL (not localhost)
-[ ] Bob accepts  →  gets his own hvs_ key
-[ ] Bob adds a memory entry via CLI
-[ ] Alice's `hshare stream` terminal shows live update within 2 seconds
-[ ] Alice searches  →  finds Bob's entry
+[ ] Maverick registers  →  gets hvs_ key
+[ ] Maverick creates hiveshare, sets default
+[ ] Maverick invites Rooster  →  link contains the server URL (not localhost)
+[ ] Rooster accepts  →  gets his own hvs_ key
+[ ] Rooster adds a memory entry via CLI
+[ ] Maverick's `hshare stream` terminal shows live update within 2 seconds
+[ ] Maverick searches  →  finds Rooster's entry
 [ ] Both have MCP loaded in Claude Code
 [ ] Claude calls search_memory before re-crunching a known ticket
 [ ] `hshare metrics` shows entries from both users

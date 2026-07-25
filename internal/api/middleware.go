@@ -25,7 +25,9 @@ type authCacheEntry struct {
 	expiresAt time.Time
 }
 
-// authCache is a small TTL LRU for API-key → user lookups.
+// authCache is a small in-process TTL cache for API-key hash → User lookups.
+// It bounds the number of DB round-trips on high-traffic endpoints. Entries
+// expire after authCacheTTL and are evicted LRU once authCacheMaxSize is reached.
 type authCache struct {
 	mu      sync.Mutex
 	entries map[string]*authCacheEntry
@@ -87,6 +89,9 @@ func (c *authCache) removeLocked(keyHash string) {
 	}
 }
 
+// AuthMiddleware extracts the Bearer token from the Authorization header,
+// resolves it to a User (with a short-lived in-process cache), and injects the
+// user into the request context. Returns 401 for missing or invalid tokens.
 func AuthMiddleware(us *store.UserStore) func(http.Handler) http.Handler {
 	cache := newAuthCache()
 	return func(next http.Handler) http.Handler {
@@ -117,6 +122,8 @@ func AuthMiddleware(us *store.UserStore) func(http.Handler) http.Handler {
 	}
 }
 
+// currentUser retrieves the authenticated User from the request context.
+// Returns nil only when called outside of AuthMiddleware (never in practice).
 func currentUser(r *http.Request) *models.User {
 	u, _ := r.Context().Value(ctxUser).(*models.User)
 	return u

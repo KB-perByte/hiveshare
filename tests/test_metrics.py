@@ -8,7 +8,7 @@ TIMEOUT = 10
 
 
 class TestHiveshareMetrics:
-    def test_hiveshare_metrics(self, api_url, user_a, hiveshare_id, memory_entry):
+    def test_hiveshare_metrics(self, api_url, user_a, hiveshare_id, hive_entry):
         resp = requests.get(
             f"{api_url}/hiveshares/{hiveshare_id}/metrics",
             headers=auth_header(user_a), timeout=TIMEOUT,

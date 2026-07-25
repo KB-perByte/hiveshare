@@ -4,22 +4,43 @@
 
 When you and your teammates use Claude Code or Cursor on the same Jira ticket or GitHub issue, every session re-crunches the same context from scratch. HiveShare fixes that: anything one person's AI agent processes gets stored as searchable memory in a shared **hiveshare**, so everyone else's agent reuses it immediately — no re-reading, no re-summarising.
 
-```
-Alice crunches PROJ-42 with Claude  →  memory saved to hiveshare
-Bob opens PROJ-42 with Cursor       →  MCP tool loads Alice's memory automatically
-                                        Bob's agent starts with full context
+```mermaid
+sequenceDiagram
+    actor Maverick as 🧑‍💻 Maverick · Claude Code
+    participant MCP as hiveshare MCP
+    participant API as hiveshare server
+    participant DB as PostgreSQL + pgvector
+    participant Redis as Redis
+    actor Rooster as 👨‍💻 Rooster · Cursor
+
+    Maverick->>MCP: add_hive(PROJ-42, crunched context)
+    MCP->>API: POST /hiveshares/{id}/hives
+    API->>DB: INSERT hive · embedding = NULL
+    API-->>Redis: PUBLISH hive_added
+    API-->>Maverick: 201 · hive saved
+    DB-->>DB: async embed worker · UPDATE embedding
+
+    Note over DB: indexed · searchable · team-visible
+
+    Rooster->>MCP: search_hives("PROJ-42 auth flow")
+    MCP->>API: POST /hives/search
+    API->>DB: HNSW cosine similarity scan
+    DB-->>API: Maverick's hive · score 0.97
+    API-->>Rooster: full context · zero re-reading
 ```
 
 ---
 
 ## Features
 
-- **Isolated hiveshares** — one per project, story, or sprint; fully separate memory spaces
+- **Isolated hiveshares** — one per project, story, or sprint; fully separate hive stores
 - **Invite by email** — token-based, no SMTP required; teammates get their own API key on accept
 - **Live sync** — `hshare stream` shows new entries from any teammate in real time (SSE; one Redis sub per hiveshare)
 - **Semantic search** — OpenAI or Ollama embeddings (async on write, HNSW index); falls back to PostgreSQL full-text if not configured
 - **MCP integration** — Claude Code and Cursor can search and save memory automatically without you doing anything
 - **Metrics** — reuse rate, top contributors, source coverage, 7-day activity
+- **Unique source refs** — one hive per `source_ref` per hiveshare; duplicates are auto-suffixed (`PROJ-42-2`) so saves never conflict
+- **Hive deletion** — write-access members can delete any hive; Redis view counters are cleaned up and a `hive_deleted` event is broadcast over SSE
 - **Hardened API** — hashed API keys, rate limits, body size cap, request timeouts, `GET /health`
 
 ---
@@ -55,13 +76,13 @@ go install github.com/KB-perByte/hiveshare/cmd/hshare@latest
 ### 3 — Register and create a hiveshare
 
 ```bash
-hshare auth register --email you@example.com --name "Alice"
+hshare auth register --email you@example.com --name "Maverick"
 # Prints your API key once and saves it to ~/.config/hiveshare/config.json
 # (server stores only SHA-256 of the key — save it now)
 
-hshare headspace create "PROJ-42 Sprint"
-hshare headspace list          # note the ID
-hshare headspace use <uuid>
+hshare hiveshare create "PROJ-42 Sprint"
+hshare hiveshare list          # note the ID
+hshare hiveshare use <uuid>
 ```
 
 ### 4 — Invite a teammate
@@ -72,7 +93,7 @@ hshare invite bob@example.com
 #   https://your-server/api/v1/invitations/<token>/accept
 ```
 
-Bob opens the link (or POSTs to it), gets his API key, and runs step 2–3 with the same server URL.
+Rooster opens the link (or POSTs to it), gets his API key, and runs step 2–3 with the same server URL.
 
 ### 5 — Connect Claude Code
 
@@ -91,36 +112,36 @@ Add to `~/.claude/claude_desktop_config.json`:
       "env": {
         "HIVESHARE_API_KEY": "hvs_your_key",
         "HIVESHARE_SERVER_URL": "https://your-server",
-        "HIVESHARE_DEFAULT_HIVESHARE": "your-hiveshare-uuid"
+        "HIVESHARE_DEFAULT_HEADSPACE": "your-hiveshare-uuid"
       }
     }
   }
 }
 ```
 
-Restart Claude Code. Claude now has five tools: `search_memory`, `add_memory`, `list_hiveshares`, `get_context`, `get_metrics`.
+Restart Claude Code. Claude now has five tools: `search_hives`, `add_hive`, `list_hiveshares`, `get_context`, `get_metrics`.
 
 ### 6 — Test it
 
-**Alice's terminal:**
+**Maverick's terminal:**
 ```bash
 hshare stream          # live tail — keep this open
 ```
 
-**Bob adds memory:**
+**Rooster saves a hive:**
 ```bash
 echo "PROJ-42: the JWT middleware needs to validate tokens before forwarding..." | \
-  hshare memory add --source-type jira --source-ref PROJ-42 --tool claude
+  hshare hive add --source-type jira --source-ref PROJ-42 --tool claude
 ```
 
-Alice's terminal immediately shows:
+Maverick's terminal immediately shows:
 ```
-[10:41:02] + memory added: jira/PROJ-42 by Bob
+[10:41:02] + hive added: jira/PROJ-42 by Rooster
 ```
 
-**Alice searches:**
+**Maverick searches:**
 ```bash
-hshare memory search "JWT validation"
+hshare hive search "JWT validation"
 ```
 
 ---
@@ -131,13 +152,13 @@ hshare memory search "JWT validation"
 hshare auth register --email EMAIL --name NAME [--server URL]
 hshare auth status
 
-hshare headspace create NAME [--description TEXT]
-hshare headspace list
-hshare headspace use ID
+hshare hiveshare create NAME [--description TEXT]
+hshare hiveshare list
+hshare hiveshare use ID
 
-hshare memory add --source-ref REF [--source-type TYPE] [--tool TOOL] [< file]
-hshare memory search QUERY [--limit N] [--source-type TYPE]
-hshare memory list [--source-type TYPE] [--limit N]
+hshare hive add --source-ref REF [--source-type TYPE] [--tool TOOL] [< file]
+hshare hive search QUERY [--limit N] [--source-type TYPE]
+hshare hive list [--source-type TYPE] [--limit N]
 
 hshare invite EMAIL [--role all|view]
 hshare members list
@@ -156,10 +177,10 @@ Roles: `all` (invite + read + write memory) · `view` (read-only)
 
 | Tool | What it does |
 |---|---|
-| `search_memory` | Semantic or full-text search across the hiveshare |
-| `add_memory` | Save crunched context (call after processing any ticket or PR) |
+| `search_hives` | Semantic or full-text search across the hiveshare |
+| `add_hive` | Save crunched context (call after processing any ticket or PR) |
 | `list_hiveshares` | List all spaces you belong to |
-| `get_context` | All memory for a specific source ref (e.g. `PROJ-42`) |
+| `get_context` | All hives for a specific source ref (e.g. `PROJ-42`) |
 | `get_metrics` | Collaboration stats for the hiveshare |
 
 ---
@@ -194,7 +215,9 @@ MCP sidecar ──┘                    │  embed workers, health
 ```
 
 - Auth: Bearer `hvs_…` key; **SHA-256 at rest**, cleartext returned only at registration
-- Writes: memory inserts immediately; embeddings filled async (search uses full-text until ready)
+- Writes: hive inserts immediately; embeddings filled async (search uses full-text until ready)
+- `source_ref` is unique per hiveshare — the API auto-suffixes duplicates (`PROJ-42-2`)
+- Delete: removes the DB row, Redis view counter, logs a usage event, and publishes `hive_deleted` over SSE
 - List endpoints omit full `content` (use Get/Search for body text)
 - Ops: `GET /health` checks Postgres + Redis
 

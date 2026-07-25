@@ -10,14 +10,17 @@ import (
 	"github.com/KB-perByte/hiveshare/internal/models"
 )
 
+// HiveshareStore manages hiveshare workspaces and their memberships.
 type HiveshareStore struct {
 	db *pgxpool.Pool
 }
 
+// NewHiveshareStore returns a HiveshareStore backed by the given pool.
 func NewHiveshareStore(db *pgxpool.Pool) *HiveshareStore {
 	return &HiveshareStore{db: db}
 }
 
+// Create creates a new hiveshare and adds the owner as an all-access member in a single transaction.
 func (s *HiveshareStore) Create(ctx context.Context, name, description string, ownerID uuid.UUID) (*models.Hiveshare, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -52,6 +55,7 @@ func (s *HiveshareStore) Create(ctx context.Context, name, description string, o
 	return &hs, nil
 }
 
+// ListForUser returns all hiveshares the user belongs to, ordered newest first.
 func (s *HiveshareStore) ListForUser(ctx context.Context, userID uuid.UUID) ([]*models.Hiveshare, error) {
 	rows, err := s.db.Query(ctx,
 		`SELECT h.id, h.name, h.description, h.owner_id, h.settings, h.created_at, h.updated_at,
@@ -79,6 +83,7 @@ func (s *HiveshareStore) ListForUser(ctx context.Context, userID uuid.UUID) ([]*
 	return result, rows.Err()
 }
 
+// Get returns a single hiveshare visible to the given user.
 func (s *HiveshareStore) Get(ctx context.Context, id, userID uuid.UUID) (*models.Hiveshare, error) {
 	var hs models.Hiveshare
 	err := s.db.QueryRow(ctx,
@@ -97,6 +102,7 @@ func (s *HiveshareStore) Get(ctx context.Context, id, userID uuid.UUID) (*models
 	return &hs, nil
 }
 
+// Update changes the name and description of a hiveshare.
 func (s *HiveshareStore) Update(ctx context.Context, id uuid.UUID, name, description string) (*models.Hiveshare, error) {
 	var hs models.Hiveshare
 	err := s.db.QueryRow(ctx,
@@ -111,11 +117,14 @@ func (s *HiveshareStore) Update(ctx context.Context, id uuid.UUID, name, descrip
 	return &hs, nil
 }
 
+// Delete removes a hiveshare and all its data (cascaded by the database).
 func (s *HiveshareStore) Delete(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.Exec(ctx, `DELETE FROM hiveshares WHERE id = $1`, id)
 	return err
 }
 
+// IsMember returns the normalised role of the user in the hiveshare, or an empty
+// string if they are not a member.
 func (s *HiveshareStore) IsMember(ctx context.Context, hiveshareID, userID uuid.UUID) (string, error) {
 	var role string
 	err := s.db.QueryRow(ctx,
@@ -131,6 +140,7 @@ func (s *HiveshareStore) IsMember(ctx context.Context, hiveshareID, userID uuid.
 	return models.NormalizeRole(role), nil
 }
 
+// ListMembers returns all members of a hiveshare ordered by join time.
 func (s *HiveshareStore) ListMembers(ctx context.Context, hiveshareID uuid.UUID) ([]*models.Member, error) {
 	rows, err := s.db.Query(ctx,
 		`SELECT hm.hiveshare_id, hm.user_id, u.name, u.email, hm.role, hm.invited_by, hm.joined_at
@@ -156,6 +166,8 @@ func (s *HiveshareStore) ListMembers(ctx context.Context, hiveshareID uuid.UUID)
 	return result, rows.Err()
 }
 
+// RemoveMember removes a user from a hiveshare. The hiveshare creator (owner_id)
+// cannot be removed.
 func (s *HiveshareStore) RemoveMember(ctx context.Context, hiveshareID, userID uuid.UUID) error {
 	// Never remove the hiveshare creator (owner_id).
 	_, err := s.db.Exec(ctx,
@@ -168,6 +180,8 @@ func (s *HiveshareStore) RemoveMember(ctx context.Context, hiveshareID, userID u
 	return err
 }
 
+// AddMember adds a user to a hiveshare with the given role. Silently no-ops if
+// they are already a member (ON CONFLICT DO NOTHING).
 func (s *HiveshareStore) AddMember(ctx context.Context, hiveshareID, userID, invitedBy uuid.UUID, role string) error {
 	role = models.NormalizeRole(role)
 	if role != models.RoleAll && role != models.RoleView {
@@ -196,6 +210,7 @@ func (s *HiveshareStore) CreateInvitation(ctx context.Context, inv *models.Invit
 	return err
 }
 
+// GetInvitation returns a pending, non-expired invitation by token.
 func (s *HiveshareStore) GetInvitation(ctx context.Context, token string) (*models.Invitation, error) {
 	var inv models.Invitation
 	err := s.db.QueryRow(ctx,
@@ -212,6 +227,7 @@ func (s *HiveshareStore) GetInvitation(ctx context.Context, token string) (*mode
 	return &inv, nil
 }
 
+// AcceptInvitation marks an invitation as accepted.
 func (s *HiveshareStore) AcceptInvitation(ctx context.Context, token string) error {
 	_, err := s.db.Exec(ctx,
 		`UPDATE invitations SET status = 'accepted' WHERE token = $1`, token,

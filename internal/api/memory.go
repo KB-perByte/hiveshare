@@ -1,19 +1,27 @@
 package api
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/KB-perByte/hiveshare/internal/embed"
 	"github.com/KB-perByte/hiveshare/internal/models"
 	"github.com/KB-perByte/hiveshare/internal/realtime"
 	"github.com/KB-perByte/hiveshare/internal/store"
 )
 
-type MemoryHandler struct {
-	mem      *store.MemoryStore
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+type HiveHandler struct {
+	mem      *store.HiveStore
 	hs       *store.HiveshareStore
 	metrics  *store.MetricsStore
 	history  *store.HistoryStore
@@ -23,8 +31,8 @@ type MemoryHandler struct {
 	views    *store.ViewCounter
 }
 
-func NewMemoryHandler(
-	mem *store.MemoryStore,
+func NewHiveHandler(
+	mem *store.HiveStore,
 	hs *store.HiveshareStore,
 	metrics *store.MetricsStore,
 	history *store.HistoryStore,
@@ -32,14 +40,14 @@ func NewMemoryHandler(
 	hub *realtime.Hub,
 	worker *embed.Worker,
 	views *store.ViewCounter,
-) *MemoryHandler {
-	return &MemoryHandler{
+) *HiveHandler {
+	return &HiveHandler{
 		mem: mem, hs: hs, metrics: metrics, history: history, embedder: embedder,
 		hub: hub, worker: worker, views: views,
 	}
 }
 
-func (h *MemoryHandler) requireAccess(r *http.Request, w http.ResponseWriter, writeRequired bool) (uuid.UUID, bool) {
+func (h *HiveHandler) requireAccess(r *http.Request, w http.ResponseWriter, writeRequired bool) (uuid.UUID, bool) {
 	u := currentUser(r)
 	id, err := parseUUID(r, "id")
 	if err != nil {
@@ -58,7 +66,7 @@ func (h *MemoryHandler) requireAccess(r *http.Request, w http.ResponseWriter, wr
 	return id, true
 }
 
-func (h *MemoryHandler) List(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) List(w http.ResponseWriter, r *http.Request) {
 	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
@@ -69,7 +77,7 @@ func (h *MemoryHandler) List(w http.ResponseWriter, r *http.Request) {
 	if limit == 0 {
 		limit = 50
 	}
-	entries, err := h.mem.List(r.Context(), hsID, store.ListMemoryFilter{
+	entries, err := h.mem.List(r.Context(), hsID, store.ListHiveFilter{
 		SourceType: q.Get("source_type"),
 		SourceRef:  q.Get("source_ref"),
 		Tag:        q.Get("tag"),
@@ -82,12 +90,12 @@ func (h *MemoryHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if entries == nil {
-		entries = []*models.MemoryEntry{}
+		entries = []*models.Hive{}
 	}
 	writeJSON(w, http.StatusOK, entries)
 }
 
-func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
@@ -121,7 +129,7 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Metadata = map[string]interface{}{}
 	}
 
-	entry := &models.MemoryEntry{
+	entry := &models.Hive{
 		HiveshareID: hsID,
 		UserID:      u.ID,
 		SourceType:  req.SourceType,
@@ -135,10 +143,22 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store immediately with embedding = NULL; embed async so HTTP isn't blocked.
-	created, err := h.mem.Create(r.Context(), entry, nil)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	// Auto-suffix source_ref (e.g. PROJ-123-2) if not unique within this hiveshare.
+	baseRef := entry.SourceRef
+	var created *models.Hive
+	var err error
+	for n := 0; ; n++ {
+		if n > 0 {
+			entry.SourceRef = fmt.Sprintf("%s-%d", baseRef, n+1)
+		}
+		created, err = h.mem.Create(r.Context(), entry, nil)
+		if err == nil {
+			break
+		}
+		if n >= 9 || !isUniqueViolation(err) {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	created.UserName = u.Name
 
@@ -153,7 +173,7 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 
 	_ = h.hub.Publish(r.Context(), models.StreamEvent{
-		Type:        "memory_added",
+		Type:        "hive_added",
 		HiveshareID: hsID,
 		Payload:     created,
 	})
@@ -161,7 +181,7 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, created)
 }
 
-func (h *MemoryHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) Get(w http.ResponseWriter, r *http.Request) {
 	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
@@ -194,7 +214,7 @@ func (h *MemoryHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entry)
 }
 
-func (h *MemoryHandler) Update(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) Update(w http.ResponseWriter, r *http.Request) {
 	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
 		return
@@ -219,14 +239,17 @@ func (h *MemoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.worker.Enqueue(embed.Job{EntryID: entry.ID, Content: req.Content})
 	}
 	_ = h.hub.Publish(r.Context(), models.StreamEvent{
-		Type:        "memory_updated",
+		Type:        "hive_updated",
 		HiveshareID: hsID,
 		Payload:     entry,
 	})
 	writeJSON(w, http.StatusOK, entry)
 }
 
-func (h *MemoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
+// Delete removes a hive entry. Only write-access members may delete. Cleans up
+// the Redis view counter and publishes a hive_deleted SSE event on success.
+func (h *HiveHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
 	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
 		return
@@ -236,11 +259,36 @@ func (h *MemoryHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid entry id")
 		return
 	}
-	_ = h.mem.Delete(r.Context(), entryID, hsID)
+	found, err := h.mem.Delete(r.Context(), entryID, hsID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "hive not found")
+		return
+	}
+
+	h.views.Delete(r.Context(), entryID)
+
+	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
+		UserID:      u.ID,
+		HiveshareID: &hsID,
+		EntryID:     &entryID,
+		EventType:   "delete",
+		Metadata:    map[string]interface{}{},
+	})
+
+	_ = h.hub.Publish(r.Context(), models.StreamEvent{
+		Type:        "hive_deleted",
+		HiveshareID: hsID,
+		Payload:     map[string]string{"id": entryID.String()},
+	})
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *MemoryHandler) Search(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) Search(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
@@ -259,7 +307,7 @@ func (h *MemoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		req.Limit = 10
 	}
 
-	var entries []*models.MemoryEntry
+	var entries []*models.Hive
 	var err error
 
 	// try vector search first
@@ -273,7 +321,7 @@ func (h *MemoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if entries == nil {
-		entries = []*models.MemoryEntry{}
+		entries = []*models.Hive{}
 	}
 
 	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
@@ -290,7 +338,7 @@ func (h *MemoryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *MemoryHandler) Stream(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
@@ -300,7 +348,7 @@ func (h *MemoryHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 // ── Per-entry history ────────────────────────────────────────────────────────
 
-func (h *MemoryHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
@@ -324,7 +372,7 @@ func (h *MemoryHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, versions)
 }
 
-func (h *MemoryHandler) Rollback(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
@@ -357,14 +405,14 @@ func (h *MemoryHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		EventType:   "rollback",
 	})
 	_ = h.hub.Publish(r.Context(), models.StreamEvent{
-		Type:        "memory_rolled_back",
+		Type:        "hive_rolled_back",
 		HiveshareID: hsID,
 		Payload:     entry,
 	})
 	writeJSON(w, http.StatusOK, entry)
 }
 
-func (h *MemoryHandler) Undelete(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) Undelete(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
@@ -392,7 +440,7 @@ func (h *MemoryHandler) Undelete(w http.ResponseWriter, r *http.Request) {
 		EventType:   "undelete",
 	})
 	_ = h.hub.Publish(r.Context(), models.StreamEvent{
-		Type:        "memory_undeleted",
+		Type:        "hive_undeleted",
 		HiveshareID: hsID,
 		Payload:     entry,
 	})
@@ -401,7 +449,7 @@ func (h *MemoryHandler) Undelete(w http.ResponseWriter, r *http.Request) {
 
 // ── Snapshots ────────────────────────────────────────────────────────────────
 
-func (h *MemoryHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
@@ -427,7 +475,7 @@ func (h *MemoryHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, snap)
 }
 
-func (h *MemoryHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
@@ -443,7 +491,7 @@ func (h *MemoryHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snaps)
 }
 
-func (h *MemoryHandler) GetSnapshot(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) GetSnapshot(w http.ResponseWriter, r *http.Request) {
 	hsID, ok := h.requireAccess(r, w, false)
 	if !ok {
 		return
@@ -464,13 +512,12 @@ func (h *MemoryHandler) GetSnapshot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *MemoryHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
 		return
 	}
-	_ = hsID
 	snapshotID, err := strconv.ParseInt(chi.URLParam(r, "snapshotId"), 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid snapshot id")
@@ -483,9 +530,9 @@ func (h *MemoryHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request) 
 	if req.Name == "" {
 		req.Name = "(restored)"
 	}
-	result, err := h.history.RestoreSnapshot(r.Context(), snapshotID, u.ID, req.Name)
+	result, err := h.history.RestoreSnapshot(r.Context(), snapshotID, hsID, u.ID, req.Name)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusNotFound, "restore failed: "+err.Error())
 		return
 	}
 	for _, id := range result.NullEmbeddings {
@@ -499,12 +546,12 @@ func (h *MemoryHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request) 
 		EventType: "snapshot_restore",
 	})
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"hiveshare":       result.Hiveshare,
+		"hiveshare":        result.Hiveshare,
 		"entries_restored": result.EntriesCreated,
 	})
 }
 
-func (h *MemoryHandler) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
 		return
@@ -514,13 +561,21 @@ func (h *MemoryHandler) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid snapshot id")
 		return
 	}
-	_ = h.history.DeleteSnapshot(r.Context(), snapshotID, hsID)
+	deleted, err := h.history.DeleteSnapshot(r.Context(), snapshotID, hsID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !deleted {
+		writeError(w, http.StatusNotFound, "snapshot not found")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // ── Copy entries ─────────────────────────────────────────────────────────────
 
-func (h *MemoryHandler) CopyEntries(w http.ResponseWriter, r *http.Request) {
+func (h *HiveHandler) CopyEntries(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	hsID, ok := h.requireAccess(r, w, true)
 	if !ok {
@@ -535,10 +590,14 @@ func (h *MemoryHandler) CopyEntries(w http.ResponseWriter, r *http.Request) {
 	}
 	results, err := h.history.CopyEntries(r.Context(), hsID, u.ID, req.EntryIDs)
 	if err != nil {
+		if errors.Is(err, store.ErrForbidden) {
+			writeError(w, http.StatusForbidden, "not a member of source hiveshare")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var entries []*models.MemoryEntry
+	var entries []*models.Hive
 	for _, cr := range results {
 		entries = append(entries, cr.Entry)
 		if !cr.HasEmbedding {

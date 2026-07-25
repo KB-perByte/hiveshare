@@ -57,7 +57,7 @@ make cli
 # or: make install  (copies to /usr/local/bin)
 
 # Register (API key is shown once — server stores SHA-256 only)
-./bin/hshare auth register --email you@example.com --name "Alice"
+./bin/hshare auth register --email you@example.com --name "Maverick"
 
 # Create a hiveshare
 ./bin/hshare hiveshare create "Auth Refactor Sprint"
@@ -66,12 +66,12 @@ make cli
 # Set it as active (saves to ~/.config/hiveshare/config.json)
 ./bin/hshare hiveshare use <hiveshare-id>
 
-# Add memory from a tool session
+# Add a hive from a tool session
 echo "PROJ-123 is about refactoring the JWT middleware..." | \
-  ./bin/hshare memory add --source-type jira --source-ref PROJ-123 --tool claude
+  ./bin/hshare hive add --source-type jira --source-ref PROJ-123 --tool claude
 
 # Search
-./bin/hshare memory search "JWT authentication"
+./bin/hshare hive search "JWT authentication"
 
 # Invite a colleague
 ./bin/hshare invite alice@example.com
@@ -121,20 +121,20 @@ Alternatively, configure via file at `~/.config/hiveshare/config.json`:
 
 | Tool | What it does |
 |---|---|
-| `search_memory` | Semantic/full-text search across hiveshare memory |
-| `add_memory` | Save processed context (auto-called after you crunch a ticket) |
+| `search_hives` | Semantic/full-text search across hiveshare hives |
+| `add_hive` | Save processed context (auto-called after you crunch a ticket) |
 | `list_hiveshares` | List all hiveshares you belong to |
-| `get_context` | All memory for a specific source ref (e.g. `PROJ-123`) |
+| `get_context` | All hives for a specific source ref (e.g. `PROJ-123`) |
 | `get_metrics` | Collaboration and reuse metrics |
 
 ### Example Claude Code workflow
 
-Claude will automatically call `search_memory` when you mention a Jira ticket or GitHub issue. After processing, it will call `add_memory` to save the context so teammates benefit instantly.
+Claude will automatically call `search_hives` when you mention a Jira ticket or GitHub issue. After processing, it will call `add_hive` to save the context so teammates benefit instantly.
 
 You can also prompt it directly:
 ```
 Search the hiveshare for anything about authentication middleware.
-Save this context about PROJ-123 to the hiveshare.
+Save this hive about PROJ-123 to the hiveshare.
 Show me metrics for this hiveshare.
 ```
 
@@ -142,9 +142,9 @@ Show me metrics for this hiveshare.
 
 1. Team member A runs: `hshare invite bob@example.com`
 2. An invite link is printed: `http://localhost:8080/api/v1/invitations/<token>/accept`
-3. Bob opens the link (or POSTs to it with `{"name": "Bob"}`)
-4. Bob gets a new account (API key returned once) and is added to the hiveshare
-5. Bob saves the key in CLI/MCP config and starts sharing memory
+3. Rooster opens the link (or POSTs to it with `{"name": "Rooster"}`)
+4. Rooster gets a new account (API key returned once) and is added to the hiveshare
+5. Rooster saves the key in CLI/MCP config and starts sharing memory
 
 Invites are rejected in SQL when `status != 'pending'` or `expires_at` has passed (default 7 days).
 
@@ -173,4 +173,4 @@ hiveshare/
 └── migrations/     SQL schema (HNSW vector index in 002/003)
 ```
 
-Memory **list** returns metadata without full `content` (keeps MCP/CLI payloads small). Use get or search for body text. Embeddings are written asynchronously after add/update; until then, search falls back to full-text for those rows.
+Hive **list** returns metadata without full `content` (keeps MCP/CLI payloads small). Use get or search for body text. Embeddings are written asynchronously after add/update; until then, search falls back to full-text for those rows. `source_ref` is unique per hiveshare — the API auto-suffixes duplicates (e.g. `PROJ-123-2`). Write-access members can delete any hive; deletion also cleans up the Redis view counter and fires a `hive_deleted` SSE event.

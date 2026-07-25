@@ -23,18 +23,18 @@
   - [POST /api/v1/invitations/{token}/accept](#post-accept-invite)
   - [GET /api/v1/hiveshares/{id}/members](#get-members)
   - [DELETE /api/v1/hiveshares/{id}/members/{userId}](#delete-member)
-- [Memory](#memory)
-  - [POST /api/v1/hiveshares/{id}/memory](#post-create-entry)
-  - [GET /api/v1/hiveshares/{id}/memory](#get-list-entries)
-  - [GET /api/v1/hiveshares/{id}/memory/{entryId}](#get-entry)
-  - [PUT /api/v1/hiveshares/{id}/memory/{entryId}](#put-update-entry)
-  - [DELETE /api/v1/hiveshares/{id}/memory/{entryId}](#delete-entry)
-  - [POST /api/v1/hiveshares/{id}/memory/search](#post-search)
-  - [POST /api/v1/hiveshares/{id}/memory/copy](#post-copy-entries)
+- [Hives](#hives)
+  - [POST /api/v1/hiveshares/{id}/hives](#post-create-entry)
+  - [GET /api/v1/hiveshares/{id}/hives](#get-list-entries)
+  - [GET /api/v1/hiveshares/{id}/hives/{entryId}](#get-entry)
+  - [PUT /api/v1/hiveshares/{id}/hives/{entryId}](#put-update-entry)
+  - [DELETE /api/v1/hiveshares/{id}/hives/{entryId}](#delete-entry)
+  - [POST /api/v1/hiveshares/{id}/hives/search](#post-search)
+  - [POST /api/v1/hiveshares/{id}/hives/copy](#post-copy-entries)
 - [History](#history)
-  - [GET /api/v1/hiveshares/{id}/memory/{entryId}/history](#get-history)
-  - [POST /api/v1/hiveshares/{id}/memory/{entryId}/rollback](#post-rollback)
-  - [POST /api/v1/hiveshares/{id}/memory/undelete](#post-undelete)
+  - [GET /api/v1/hiveshares/{id}/hives/{entryId}/history](#get-history)
+  - [POST /api/v1/hiveshares/{id}/hives/{entryId}/rollback](#post-rollback)
+  - [POST /api/v1/hiveshares/{id}/hives/undelete](#post-undelete)
 - [Snapshots](#snapshots)
   - [POST /api/v1/hiveshares/{id}/snapshots](#post-create-snapshot)
   - [GET /api/v1/hiveshares/{id}/snapshots](#get-list-snapshots)
@@ -473,11 +473,11 @@ curl -X DELETE http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/members/USER
 
 ---
 
-## Memory
+## Hives
 
 ### POST Create Entry
 
-`POST /api/v1/hiveshares/{id}/memory`
+`POST /api/v1/hiveshares/{id}/hives`
 
 **Auth:** Required
 **Access:** CanWrite
@@ -537,7 +537,7 @@ Embedding is generated asynchronously after creation.
 
 **Example:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory \
+curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives \
   -H "Authorization: Bearer hvs_YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"source_type":"jira","source_ref":"PROJ-123","content":"Analysis...","tool":"claude","tags":["auth"]}'
@@ -547,7 +547,7 @@ curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory \
 
 ### GET List Entries
 
-`GET /api/v1/hiveshares/{id}/memory`
+`GET /api/v1/hiveshares/{id}/hives`
 
 **Auth:** Required
 **Access:** CanView
@@ -586,7 +586,7 @@ List responses omit `content` to keep payloads small. Use the GET single entry e
 
 **Example:**
 ```bash
-curl "http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory?source_type=jira&limit=10" \
+curl "http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives?source_type=jira&limit=10" \
   -H "Authorization: Bearer hvs_YOUR_API_KEY"
 ```
 
@@ -594,7 +594,7 @@ curl "http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory?source_type=ji
 
 ### GET Entry
 
-`GET /api/v1/hiveshares/{id}/memory/{entryId}`
+`GET /api/v1/hiveshares/{id}/hives/{entryId}`
 
 **Auth:** Required
 **Access:** CanView
@@ -628,7 +628,7 @@ Returns the full entry including content. Increments view counter.
 
 **Example:**
 ```bash
-curl http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_ID \
+curl http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/ENTRY_ID \
   -H "Authorization: Bearer hvs_YOUR_API_KEY"
 ```
 
@@ -636,7 +636,7 @@ curl http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_ID \
 
 ### PUT Update Entry
 
-`PUT /api/v1/hiveshares/{id}/memory/{entryId}`
+`PUT /api/v1/hiveshares/{id}/hives/{entryId}`
 
 **Auth:** Required
 **Access:** CanWrite
@@ -659,7 +659,7 @@ All fields are optional. Updating content triggers re-embedding.
 
 **Example:**
 ```bash
-curl -X PUT http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_ID \
+curl -X PUT http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/ENTRY_ID \
   -H "Authorization: Bearer hvs_YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"content":"Updated analysis...","tags":["auth","updated"]}'
@@ -669,7 +669,7 @@ curl -X PUT http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_ID
 
 ### DELETE Entry
 
-`DELETE /api/v1/hiveshares/{id}/memory/{entryId}`
+`DELETE /api/v1/hiveshares/{id}/hives/{entryId}`
 
 **Auth:** Required
 **Access:** CanWrite
@@ -678,7 +678,7 @@ curl -X PUT http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_ID
 
 **Example:**
 ```bash
-curl -X DELETE http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_ID \
+curl -X DELETE http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/ENTRY_ID \
   -H "Authorization: Bearer hvs_YOUR_API_KEY"
 ```
 
@@ -686,7 +686,7 @@ curl -X DELETE http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY
 
 ### POST Search
 
-`POST /api/v1/hiveshares/{id}/memory/search`
+`POST /api/v1/hiveshares/{id}/hives/search`
 
 **Auth:** Required
 **Access:** CanView
@@ -738,7 +738,7 @@ Searches by semantic similarity (vector search) if embeddings are enabled, falls
 
 **Example:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/search \
+curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/search \
   -H "Authorization: Bearer hvs_YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"query":"auth refactor","limit":5}'
@@ -748,12 +748,12 @@ curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/search 
 
 ### POST Copy Entries
 
-`POST /api/v1/hiveshares/{id}/memory/copy`
+`POST /api/v1/hiveshares/{id}/hives/copy`
 
 **Auth:** Required
 **Access:** CanWrite on target hiveshare; CanView on source hiveshare(s)
 
-Copies memory entries (including embeddings) from any accessible hiveshare into the target. Used for rollforward merges after a snapshot restore.
+Copies hives (including embeddings) from any accessible hiveshare into the target. Used for rollforward merges after a snapshot restore.
 
 **Request body:**
 ```json
@@ -783,7 +783,7 @@ Entries with NULL embeddings are queued for re-embedding.
 
 **Example:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/hiveshares/TARGET_ID/memory/copy \
+curl -X POST http://localhost:8080/api/v1/hiveshares/TARGET_ID/hives/copy \
   -H "Authorization: Bearer hvs_YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"entry_ids":["ENTRY_UUID_1","ENTRY_UUID_2"]}'
@@ -795,12 +795,12 @@ curl -X POST http://localhost:8080/api/v1/hiveshares/TARGET_ID/memory/copy \
 
 ### GET History
 
-`GET /api/v1/hiveshares/{id}/memory/{entryId}/history`
+`GET /api/v1/hiveshares/{id}/hives/{entryId}/history`
 
 **Auth:** Required
 **Access:** CanView
 
-Returns version history for a memory entry, including deleted entries.
+Returns version history for a hive, including deleted entries.
 
 **Query parameters:**
 
@@ -842,7 +842,7 @@ Returns version history for a memory entry, including deleted entries.
 
 **Example:**
 ```bash
-curl "http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_ID/history?limit=10" \
+curl "http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/ENTRY_ID/history?limit=10" \
   -H "Authorization: Bearer hvs_YOUR_API_KEY"
 ```
 
@@ -850,12 +850,12 @@ curl "http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_ID/histo
 
 ### POST Rollback
 
-`POST /api/v1/hiveshares/{id}/memory/{entryId}/rollback`
+`POST /api/v1/hiveshares/{id}/hives/{entryId}/rollback`
 
 **Auth:** Required
 **Access:** CanWrite
 
-Restores a memory entry to a prior version. If the history version has an embedding, it is restored directly. If not, a re-embed job is enqueued.
+Restores a hive to a prior version. If the history version has an embedding, it is restored directly. If not, a re-embed job is enqueued.
 
 **Request body:**
 ```json
@@ -872,7 +872,7 @@ Restores a memory entry to a prior version. If the history version has an embedd
 
 **Example:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_ID/rollback \
+curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/ENTRY_ID/rollback \
   -H "Authorization: Bearer hvs_YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"history_id":41}'
@@ -882,12 +882,12 @@ curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/ENTRY_I
 
 ### POST Undelete
 
-`POST /api/v1/hiveshares/{id}/memory/undelete`
+`POST /api/v1/hiveshares/{id}/hives/undelete`
 
 **Auth:** Required
 **Access:** CanWrite
 
-Restores a deleted memory entry from its history record. The history version must have `action: "delete"`.
+Restores a deleted hive from its history record. The history version must have `action: "delete"`.
 
 **Request body:**
 ```json
@@ -904,7 +904,7 @@ Restores a deleted memory entry from its history record. The history version mus
 
 **Example:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/undelete \
+curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/undelete \
   -H "Authorization: Bearer hvs_YOUR_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"history_id":43}'
@@ -921,7 +921,7 @@ curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/memory/undelet
 **Auth:** Required
 **Access:** CanWrite
 
-Creates a point-in-time snapshot of all memory entries in the hiveshare, including their embeddings.
+Creates a point-in-time snapshot of all hives in the hiveshare, including their embeddings.
 
 **Request body:**
 ```json
@@ -1197,10 +1197,10 @@ Cache-Control: no-cache
 | Event | Payload | When |
 |-------|---------|------|
 | `connected` | `{"hiveshare_id": "uuid"}` | Initial connection |
-| `memory_added` | Full memory entry | Entry created |
-| `memory_updated` | Full memory entry | Entry updated |
-| `memory_rolled_back` | Full memory entry | Entry rolled back |
-| `memory_undeleted` | Full memory entry | Entry restored from deletion |
+| `hive_added` | Full hive | Entry created |
+| `hive_updated` | Full hive | Entry updated |
+| `hive_rolled_back` | Full hive | Entry rolled back |
+| `hive_undeleted` | Full hive | Entry restored from deletion |
 
 Keepalive comments (`: keepalive`) are sent every 25 seconds.
 

@@ -11,15 +11,15 @@ import (
 	"github.com/KB-perByte/hiveshare/internal/models"
 )
 
-type MemoryStore struct {
+type HiveStore struct {
 	db *pgxpool.Pool
 }
 
-func NewMemoryStore(db *pgxpool.Pool) *MemoryStore {
-	return &MemoryStore{db: db}
+func NewHiveStore(db *pgxpool.Pool) *HiveStore {
+	return &HiveStore{db: db}
 }
 
-type ListMemoryFilter struct {
+type ListHiveFilter struct {
 	SourceType string
 	SourceRef  string
 	Tag        string
@@ -28,14 +28,14 @@ type ListMemoryFilter struct {
 	Offset     int
 }
 
-func (s *MemoryStore) Create(ctx context.Context, e *models.MemoryEntry, embedding []float32) (*models.MemoryEntry, error) {
+func (s *HiveStore) Create(ctx context.Context, e *models.Hive, embedding []float32) (*models.Hive, error) {
 	var embVal interface{}
 	if len(embedding) > 0 {
 		embVal = pgvector.NewVector(embedding)
 	}
 
 	err := s.db.QueryRow(ctx,
-		`INSERT INTO memory_entries
+		`INSERT INTO hives
 		 (hiveshare_id, user_id, source_type, source_ref, source_url, tool, content, summary, embedding, tags, metadata)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		 RETURNING id, created_at, updated_at`,
@@ -48,15 +48,15 @@ func (s *MemoryStore) Create(ctx context.Context, e *models.MemoryEntry, embeddi
 	return e, nil
 }
 
-func (s *MemoryStore) UpdateEmbedding(ctx context.Context, id uuid.UUID, embedding []float32) error {
+func (s *HiveStore) UpdateEmbedding(ctx context.Context, id uuid.UUID, embedding []float32) error {
 	_, err := s.db.Exec(ctx,
-		`UPDATE memory_entries SET embedding = $2, updated_at = NOW() WHERE id = $1`,
+		`UPDATE hives SET embedding = $2, updated_at = NOW() WHERE id = $1`,
 		id, pgvector.NewVector(embedding),
 	)
 	return err
 }
 
-func (s *MemoryStore) List(ctx context.Context, hiveshareID uuid.UUID, f ListMemoryFilter) ([]*models.MemoryEntry, error) {
+func (s *HiveStore) List(ctx context.Context, hiveshareID uuid.UUID, f ListHiveFilter) ([]*models.Hive, error) {
 	if f.Limit == 0 {
 		f.Limit = 50
 	}
@@ -90,7 +90,7 @@ func (s *MemoryStore) List(ctx context.Context, hiveshareID uuid.UUID, f ListMem
 	q := fmt.Sprintf(
 		`SELECT me.id, me.hiveshare_id, me.user_id, u.name, me.source_type, me.source_ref,
 		        me.summary, me.tags, me.views, me.reuses, me.created_at
-		 FROM memory_entries me
+		 FROM hives me
 		 JOIN users u ON u.id = me.user_id
 		 WHERE %s
 		 ORDER BY me.created_at DESC
@@ -100,11 +100,11 @@ func (s *MemoryStore) List(ctx context.Context, hiveshareID uuid.UUID, f ListMem
 	return s.scanListRows(ctx, q, args...)
 }
 
-func (s *MemoryStore) Get(ctx context.Context, id, hiveshareID uuid.UUID) (*models.MemoryEntry, error) {
+func (s *HiveStore) Get(ctx context.Context, id, hiveshareID uuid.UUID) (*models.Hive, error) {
 	rows, err := s.scanRows(ctx,
 		`SELECT me.id, me.hiveshare_id, me.user_id, u.name, me.source_type, me.source_ref, me.source_url,
 		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at
-		 FROM memory_entries me
+		 FROM hives me
 		 JOIN users u ON u.id = me.user_id
 		 WHERE me.id = $1 AND me.hiveshare_id = $2`, id, hiveshareID,
 	)
@@ -114,10 +114,10 @@ func (s *MemoryStore) Get(ctx context.Context, id, hiveshareID uuid.UUID) (*mode
 	return rows[0], nil
 }
 
-func (s *MemoryStore) Update(ctx context.Context, id, hiveshareID uuid.UUID, content, summary string, tags []string) (*models.MemoryEntry, error) {
-	var e models.MemoryEntry
+func (s *HiveStore) Update(ctx context.Context, id, hiveshareID uuid.UUID, content, summary string, tags []string) (*models.Hive, error) {
+	var e models.Hive
 	err := s.db.QueryRow(ctx,
-		`UPDATE memory_entries SET content = $3, summary = $4, tags = $5, embedding = NULL, updated_at = NOW()
+		`UPDATE hives SET content = $3, summary = $4, tags = $5, embedding = NULL, updated_at = NOW()
 		 WHERE id = $1 AND hiveshare_id = $2
 		 RETURNING id, hiveshare_id, user_id, source_type, source_ref, source_url, tool,
 		           content, summary, tags, metadata, views, reuses, created_at, updated_at`,
@@ -130,15 +130,20 @@ func (s *MemoryStore) Update(ctx context.Context, id, hiveshareID uuid.UUID, con
 	return &e, nil
 }
 
-func (s *MemoryStore) Delete(ctx context.Context, id, hiveshareID uuid.UUID) error {
-	_, err := s.db.Exec(ctx,
-		`DELETE FROM memory_entries WHERE id = $1 AND hiveshare_id = $2`, id, hiveshareID,
+// Delete removes a hive entry. Returns (false, nil) when the entry does not
+// exist in this hiveshare so the handler can return 404 without a DB error.
+func (s *HiveStore) Delete(ctx context.Context, id, hiveshareID uuid.UUID) (bool, error) {
+	tag, err := s.db.Exec(ctx,
+		`DELETE FROM hives WHERE id = $1 AND hiveshare_id = $2`, id, hiveshareID,
 	)
-	return err
+	if err != nil {
+		return false, fmt.Errorf("delete hive: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // SearchVector performs cosine similarity search.
-func (s *MemoryStore) SearchVector(ctx context.Context, hiveshareID uuid.UUID, embedding []float32, sourceType string, limit int) ([]*models.MemoryEntry, error) {
+func (s *HiveStore) SearchVector(ctx context.Context, hiveshareID uuid.UUID, embedding []float32, sourceType string, limit int) ([]*models.Hive, error) {
 	if limit == 0 {
 		limit = 10
 	}
@@ -157,7 +162,7 @@ func (s *MemoryStore) SearchVector(ctx context.Context, hiveshareID uuid.UUID, e
 		`SELECT me.id, me.hiveshare_id, me.user_id, u.name, me.source_type, me.source_ref, me.source_url,
 		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at,
 		        1 - (me.embedding <=> $2) AS score
-		 FROM memory_entries me
+		 FROM hives me
 		 JOIN users u ON u.id = me.user_id
 		 WHERE %s
 		 ORDER BY me.embedding <=> $2
@@ -168,7 +173,7 @@ func (s *MemoryStore) SearchVector(ctx context.Context, hiveshareID uuid.UUID, e
 }
 
 // SearchFullText performs PostgreSQL full-text search.
-func (s *MemoryStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID, query, sourceType string, limit int) ([]*models.MemoryEntry, error) {
+func (s *HiveStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID, query, sourceType string, limit int) ([]*models.Hive, error) {
 	if limit == 0 {
 		limit = 10
 	}
@@ -190,7 +195,7 @@ func (s *MemoryStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID,
 		`SELECT me.id, me.hiveshare_id, me.user_id, u.name, me.source_type, me.source_ref, me.source_url,
 		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at,
 		        ts_rank(to_tsvector('english', me.content), plainto_tsquery('english', $2)) AS score
-		 FROM memory_entries me
+		 FROM hives me
 		 JOIN users u ON u.id = me.user_id
 		 WHERE %s
 		 ORDER BY score DESC
@@ -200,21 +205,21 @@ func (s *MemoryStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID,
 	return s.scanRowsWithScore(ctx, q, args...)
 }
 
-func (s *MemoryStore) IncrementReuse(ctx context.Context, id uuid.UUID) error {
-	_, err := s.db.Exec(ctx, `UPDATE memory_entries SET reuses = reuses + 1 WHERE id = $1`, id)
+func (s *HiveStore) IncrementReuse(ctx context.Context, id uuid.UUID) error {
+	_, err := s.db.Exec(ctx, `UPDATE hives SET reuses = reuses + 1 WHERE id = $1`, id)
 	return err
 }
 
-func (s *MemoryStore) scanListRows(ctx context.Context, q string, args ...interface{}) ([]*models.MemoryEntry, error) {
+func (s *HiveStore) scanListRows(ctx context.Context, q string, args ...interface{}) ([]*models.Hive, error) {
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var result []*models.MemoryEntry
+	var result []*models.Hive
 	for rows.Next() {
-		var e models.MemoryEntry
+		var e models.Hive
 		if err := rows.Scan(&e.ID, &e.HiveshareID, &e.UserID, &e.UserName,
 			&e.SourceType, &e.SourceRef, &e.Summary, &e.Tags, &e.Views, &e.Reuses, &e.CreatedAt); err != nil {
 			return nil, err
@@ -224,16 +229,16 @@ func (s *MemoryStore) scanListRows(ctx context.Context, q string, args ...interf
 	return result, rows.Err()
 }
 
-func (s *MemoryStore) scanRows(ctx context.Context, q string, args ...interface{}) ([]*models.MemoryEntry, error) {
+func (s *HiveStore) scanRows(ctx context.Context, q string, args ...interface{}) ([]*models.Hive, error) {
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var result []*models.MemoryEntry
+	var result []*models.Hive
 	for rows.Next() {
-		var e models.MemoryEntry
+		var e models.Hive
 		if err := rows.Scan(&e.ID, &e.HiveshareID, &e.UserID, &e.UserName,
 			&e.SourceType, &e.SourceRef, &e.SourceURL, &e.Tool,
 			&e.Content, &e.Summary, &e.Tags, &e.Metadata, &e.Views, &e.Reuses,
@@ -245,16 +250,16 @@ func (s *MemoryStore) scanRows(ctx context.Context, q string, args ...interface{
 	return result, rows.Err()
 }
 
-func (s *MemoryStore) scanRowsWithScore(ctx context.Context, q string, args ...interface{}) ([]*models.MemoryEntry, error) {
+func (s *HiveStore) scanRowsWithScore(ctx context.Context, q string, args ...interface{}) ([]*models.Hive, error) {
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var result []*models.MemoryEntry
+	var result []*models.Hive
 	for rows.Next() {
-		var e models.MemoryEntry
+		var e models.Hive
 		if err := rows.Scan(&e.ID, &e.HiveshareID, &e.UserID, &e.UserName,
 			&e.SourceType, &e.SourceRef, &e.SourceURL, &e.Tool,
 			&e.Content, &e.Summary, &e.Tags, &e.Metadata, &e.Views, &e.Reuses,

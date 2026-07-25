@@ -9,14 +9,19 @@ import (
 	"github.com/KB-perByte/hiveshare/internal/models"
 )
 
+// MetricsStore records usage events and computes aggregated analytics for
+// hiveshares and individual users.
 type MetricsStore struct {
 	db *pgxpool.Pool
 }
 
+// NewMetricsStore returns a MetricsStore backed by the given pool.
 func NewMetricsStore(db *pgxpool.Pool) *MetricsStore {
 	return &MetricsStore{db: db}
 }
 
+// RecordEvent inserts a usage event row. Errors are intentionally ignored by
+// callers — analytics must not block or fail request handling.
 func (s *MetricsStore) RecordEvent(ctx context.Context, ev *models.UsageEvent) error {
 	_, err := s.db.Exec(ctx,
 		`INSERT INTO usage_events (user_id, hiveshare_id, entry_id, event_type, metadata)
@@ -26,6 +31,8 @@ func (s *MetricsStore) RecordEvent(ctx context.Context, ev *models.UsageEvent) e
 	return err
 }
 
+// HiveshareMetrics computes the full analytics snapshot for a hiveshare,
+// including hive counts, collab stats, source coverage, and 7-day activity.
 func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*models.HiveshareMetrics, error) {
 	m := &models.HiveshareMetrics{}
 
@@ -41,17 +48,17 @@ func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*m
 	}
 
 	// memory counts
-	m.Memory.BySourceType = make(map[string]int)
-	m.Memory.ByTool = make(map[string]int)
+	m.Hive.BySourceType = make(map[string]int)
+	m.Hive.ByTool = make(map[string]int)
 
 	if err := s.db.QueryRow(ctx,
-		`SELECT COUNT(*), COUNT(DISTINCT source_ref) FROM memory_entries WHERE hiveshare_id = $1`, hsID,
-	).Scan(&m.Memory.TotalEntries, &m.Memory.UniqueSources); err != nil {
+		`SELECT COUNT(*), COUNT(DISTINCT source_ref) FROM hives WHERE hiveshare_id = $1`, hsID,
+	).Scan(&m.Hive.TotalEntries, &m.Hive.UniqueSources); err != nil {
 		return nil, err
 	}
 
 	rows, err := s.db.Query(ctx,
-		`SELECT source_type, COUNT(*) FROM memory_entries WHERE hiveshare_id = $1 GROUP BY source_type`, hsID,
+		`SELECT source_type, COUNT(*) FROM hives WHERE hiveshare_id = $1 GROUP BY source_type`, hsID,
 	)
 	if err != nil {
 		return nil, err
@@ -60,12 +67,12 @@ func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*m
 		var k string
 		var v int
 		rows.Scan(&k, &v)
-		m.Memory.BySourceType[k] = v
+		m.Hive.BySourceType[k] = v
 	}
 	rows.Close()
 
 	rows, err = s.db.Query(ctx,
-		`SELECT tool, COUNT(*) FROM memory_entries WHERE hiveshare_id = $1 GROUP BY tool`, hsID,
+		`SELECT tool, COUNT(*) FROM hives WHERE hiveshare_id = $1 GROUP BY tool`, hsID,
 	)
 	if err != nil {
 		return nil, err
@@ -74,13 +81,13 @@ func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*m
 		var k string
 		var v int
 		rows.Scan(&k, &v)
-		m.Memory.ByTool[k] = v
+		m.Hive.ByTool[k] = v
 	}
 	rows.Close()
 
 	// collab metrics
 	if err := s.db.QueryRow(ctx,
-		`SELECT COALESCE(SUM(views),0), COALESCE(SUM(reuses),0) FROM memory_entries WHERE hiveshare_id = $1`, hsID,
+		`SELECT COALESCE(SUM(views),0), COALESCE(SUM(reuses),0) FROM hives WHERE hiveshare_id = $1`, hsID,
 	).Scan(&m.Collab.TotalViews, &m.Collab.TotalReuses); err != nil {
 		return nil, err
 	}
@@ -91,7 +98,7 @@ func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*m
 	// top contributors
 	rows, err = s.db.Query(ctx,
 		`SELECT u.id, u.name, COUNT(me.id) AS entries, COALESCE(SUM(me.reuses),0) AS reuses_received
-		 FROM memory_entries me
+		 FROM hives me
 		 JOIN users u ON u.id = me.user_id
 		 WHERE me.hiveshare_id = $1
 		 GROUP BY u.id, u.name
@@ -113,7 +120,7 @@ func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*m
 		`SELECT
 		  COUNT(*) FILTER (WHERE source_type = 'jira'),
 		  COUNT(*) FILTER (WHERE source_type IN ('github_issue','github_pr'))
-		 FROM (SELECT DISTINCT source_ref, source_type FROM memory_entries WHERE hiveshare_id = $1) AS t`, hsID,
+		 FROM (SELECT DISTINCT source_ref, source_type FROM hives WHERE hiveshare_id = $1) AS t`, hsID,
 	).Scan(&m.Coverage.JiraRefsWithMemory, &m.Coverage.GithubRefsWithMemory); err != nil {
 		return nil, err
 	}
@@ -134,11 +141,12 @@ func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*m
 	return m, nil
 }
 
+// UserMetrics returns contribution and membership statistics for a single user.
 func (s *MetricsStore) UserMetrics(ctx context.Context, userID uuid.UUID) (*models.UserMetrics, error) {
 	m := &models.UserMetrics{}
 
 	if err := s.db.QueryRow(ctx,
-		`SELECT COUNT(*) FROM memory_entries WHERE user_id = $1`, userID,
+		`SELECT COUNT(*) FROM hives WHERE user_id = $1`, userID,
 	).Scan(&m.TotalEntries); err != nil {
 		return nil, err
 	}
@@ -162,7 +170,7 @@ func (s *MetricsStore) UserMetrics(ctx context.Context, userID uuid.UUID) (*mode
 	}
 
 	if err := s.db.QueryRow(ctx,
-		`SELECT COALESCE(SUM(reuses),0) FROM memory_entries WHERE user_id = $1`, userID,
+		`SELECT COALESCE(SUM(reuses),0) FROM hives WHERE user_id = $1`, userID,
 	).Scan(&m.TotalReusesGiven); err != nil {
 		return nil, err
 	}

@@ -1,3 +1,5 @@
+// Package mcp implements the MCP (Model Context Protocol) stdio server and the
+// HTTP API client proxy that backs its tool calls.
 package mcp
 
 import (
@@ -7,7 +9,7 @@ import (
 	"io"
 )
 
-// JSON-RPC 2.0 types for MCP protocol
+// JSON-RPC 2.0 types used by the MCP server and client.
 
 type Request struct {
 	JSONRPC string          `json:"jsonrpc"`

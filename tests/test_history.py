@@ -16,9 +16,9 @@ TIMEOUT = 10
 class TestEntryHistory:
     """Per-entry history, rollback, and undelete."""
 
-    def test_create_generates_history(self, api_url, user_a, hiveshare_id, memory_entry):
+    def test_create_generates_history(self, api_url, user_a, hiveshare_id, hive_entry):
         resp = requests.get(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory/{memory_entry['id']}/history",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{hive_entry['id']}/history",
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
         resp.raise_for_status()
@@ -26,15 +26,15 @@ class TestEntryHistory:
         assert len(versions) >= 1
         assert versions[-1]["action"] == "insert"
 
-    def test_update_generates_history(self, api_url, user_a, hiveshare_id, memory_entry):
+    def test_update_generates_history(self, api_url, user_a, hiveshare_id, hive_entry):
         requests.put(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory/{memory_entry['id']}",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{hive_entry['id']}",
             json={"content": "Updated content", "summary": "Updated", "tags": ["test", "updated"]},
             headers=auth_header(user_a), timeout=TIMEOUT,
         ).raise_for_status()
 
         resp = requests.get(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory/{memory_entry['id']}/history",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{hive_entry['id']}/history",
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
         resp.raise_for_status()
@@ -42,9 +42,9 @@ class TestEntryHistory:
         actions = [v["action"] for v in versions]
         assert "update" in actions
 
-    def test_rollback_restores_content(self, api_url, user_a, hiveshare_id, memory_entry):
+    def test_rollback_restores_content(self, api_url, user_a, hiveshare_id, hive_entry):
         resp = requests.get(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory/{memory_entry['id']}/history",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{hive_entry['id']}/history",
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
         resp.raise_for_status()
@@ -52,7 +52,7 @@ class TestEntryHistory:
         insert_version = [v for v in versions if v["action"] == "insert"][-1]
 
         resp = requests.post(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory/{memory_entry['id']}/rollback",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{hive_entry['id']}/rollback",
             json={"history_id": insert_version["history_id"]},
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
@@ -62,7 +62,7 @@ class TestEntryHistory:
 
     def test_delete_and_undelete(self, api_url, user_a, hiveshare_id):
         create_resp = requests.post(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives",
             json={
                 "source_type": "manual",
                 "source_ref": "delete-test",
@@ -76,18 +76,18 @@ class TestEntryHistory:
         entry_id = create_resp.json()["id"]
 
         requests.delete(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory/{entry_id}",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{entry_id}",
             headers=auth_header(user_a), timeout=TIMEOUT,
         ).raise_for_status()
 
         get_resp = requests.get(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory/{entry_id}",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{entry_id}",
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
         assert get_resp.status_code == 404
 
         hist_resp = requests.get(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory/{entry_id}/history",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{entry_id}/history",
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
         hist_resp.raise_for_status()
@@ -95,7 +95,7 @@ class TestEntryHistory:
         delete_version = [v for v in versions if v["action"] == "delete"][0]
 
         undelete_resp = requests.post(
-            f"{api_url}/hiveshares/{hiveshare_id}/memory/undelete",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/undelete",
             json={"history_id": delete_version["history_id"]},
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
@@ -187,7 +187,7 @@ class TestSnapshots:
 class TestCopyEntries:
     """Cross-hiveshare entry copy (rollforward merge)."""
 
-    def test_copy_entry_to_another_hiveshare(self, api_url, user_a, hiveshare_id, memory_entry):
+    def test_copy_entry_to_another_hiveshare(self, api_url, user_a, hiveshare_id, hive_entry):
         new_hs_resp = requests.post(
             f"{api_url}/hiveshares",
             json={"name": "Copy Target"},
@@ -197,8 +197,8 @@ class TestCopyEntries:
         target_id = new_hs_resp.json()["id"]
 
         copy_resp = requests.post(
-            f"{api_url}/hiveshares/{target_id}/memory/copy",
-            json={"entry_ids": [memory_entry["id"]]},
+            f"{api_url}/hiveshares/{target_id}/hives/copy",
+            json={"entry_ids": [hive_entry["id"]]},
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
         copy_resp.raise_for_status()
@@ -206,4 +206,4 @@ class TestCopyEntries:
         copied = copy_resp.json()
         assert len(copied) == 1
         assert copied[0]["hiveshare_id"] == target_id
-        assert copied[0]["content"] == memory_entry.get("content", copied[0]["content"])
+        assert copied[0]["content"] == hive_entry.get("content", copied[0]["content"])

@@ -12,10 +12,13 @@ import (
 	"github.com/KB-perByte/hiveshare/internal/models"
 )
 
+// UserStore manages user accounts. API keys are stored as SHA-256 hashes;
+// the cleartext key is returned only once at registration time.
 type UserStore struct {
 	db *pgxpool.Pool
 }
 
+// NewUserStore returns a UserStore backed by the given connection pool.
 func NewUserStore(db *pgxpool.Pool) *UserStore {
 	return &UserStore{db: db}
 }
@@ -40,6 +43,7 @@ func (s *UserStore) Create(ctx context.Context, email, name string) (*models.Use
 	return &u, nil
 }
 
+// GetByAPIKey looks up a user by their cleartext API key (hashed before querying).
 func (s *UserStore) GetByAPIKey(ctx context.Context, key string) (*models.User, error) {
 	var u models.User
 	err := s.db.QueryRow(ctx,
@@ -51,6 +55,7 @@ func (s *UserStore) GetByAPIKey(ctx context.Context, key string) (*models.User, 
 	return &u, nil
 }
 
+// GetByEmail returns the user with the given email address.
 func (s *UserStore) GetByEmail(ctx context.Context, email string) (*models.User, error) {
 	var u models.User
 	err := s.db.QueryRow(ctx,
@@ -62,6 +67,7 @@ func (s *UserStore) GetByEmail(ctx context.Context, email string) (*models.User,
 	return &u, nil
 }
 
+// GetByID returns the user with the given UUID.
 func (s *UserStore) GetByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
 	var u models.User
 	err := s.db.QueryRow(ctx,
