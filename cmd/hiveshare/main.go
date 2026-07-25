@@ -863,8 +863,8 @@ func metricsCmd() *cobra.Command {
 				fmt.Println("── Personal Metrics ──────────────────")
 				fmt.Printf("Entries contributed:  %.0f\n", result["total_entries"])
 				fmt.Printf("Searches performed:   %.0f\n", result["total_searches"])
-				fmt.Printf("Headspaces owned:     %.0f\n", result["hiveshares_owned"])
-				fmt.Printf("Headspaces joined:    %.0f\n", result["hiveshares_joined"])
+				fmt.Printf("Hiveshares owned:     %.0f\n", result["hiveshares_owned"])
+				fmt.Printf("Hiveshares joined:    %.0f\n", result["hiveshares_joined"])
 				fmt.Printf("Total reuses given:   %.0f\n", result["total_reuses_given"])
 				return nil
 			}

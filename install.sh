@@ -82,4 +82,4 @@ printf '\n\033[0;32mHiveShare %s installed.\033[0m\n\n' "$TAG"
 printf 'Next steps:\n'
 printf '  1. Start the server:  see https://github.com/%s#quick-start\n' "$REPO"
 printf '  2. Register:          hshare auth register --email you@example.com --name "You"\n'
-printf '  3. Create a space:    hshare headspace create "My Project"\n\n'
+printf '  3. Create a space:    hshare hiveshare create "My Project"\n\n'

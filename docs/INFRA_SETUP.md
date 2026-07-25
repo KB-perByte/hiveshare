@@ -84,9 +84,9 @@ OPENAI_API_KEY=sk-... \
   --name "Maverick"
 # saves hvs_... key to ~/.config/hiveshare/config.json
 
-./bin/hshare headspace create "Sprint 42"
-./bin/hshare headspace list        # note the UUID
-./bin/hshare headspace use <uuid>
+./bin/hshare hiveshare create "Sprint 42"
+./bin/hshare hiveshare list        # note the UUID
+./bin/hshare hiveshare use <uuid>
 ```
 
 ### Step 5 — Invite your teammate
@@ -342,8 +342,8 @@ sudo systemctl reload nginx
   --email you@example.com \
   --name "Maverick"
 
-./bin/hshare headspace create "Sprint 42"
-./bin/hshare headspace use <uuid>
+./bin/hshare hiveshare create "Sprint 42"
+./bin/hshare hiveshare use <uuid>
 
 ./bin/hshare invite bob@example.com
 # → prints invite link using https://hiveshare.yourdomain.com/...
@@ -495,8 +495,8 @@ BASE_URL=https://hiveshare-hiveshare.apps.YOUR_CLUSTER_DOMAIN
   --email you@example.com \
   --name "Maverick"
 
-./bin/hshare headspace create "Sprint 42"
-./bin/hshare headspace use <uuid>
+./bin/hshare hiveshare create "Sprint 42"
+./bin/hshare hiveshare use <uuid>
 
 ./bin/hshare invite bob@example.com
 ```

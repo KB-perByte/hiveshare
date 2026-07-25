@@ -58,8 +58,8 @@ func (c *APIClient) do(ctx context.Context, method, path string, body interface{
 	return nil
 }
 
-// ListHeadspaces returns all hiveshares accessible to the authenticated user.
-func (c *APIClient) ListHeadspaces(ctx context.Context) ([]map[string]interface{}, error) {
+// ListHiveshares returns all hiveshares accessible to the authenticated user.
+func (c *APIClient) ListHiveshares(ctx context.Context) ([]map[string]interface{}, error) {
 	var result []map[string]interface{}
 	err := c.do(ctx, http.MethodGet, "/api/v1/hiveshares", nil, &result)
 	return result, err

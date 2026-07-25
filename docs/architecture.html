@@ -328,7 +328,7 @@
     <tr><td><code>internal/store/users.go</code></td><td>SHA-256 API keys</td></tr>
     <tr><td><code>internal/store/memory.go</code></td><td>CRUD, list-without-content, HNSW/FTS search</td></tr>
     <tr><td><code>internal/store/views.go</code></td><td>Redis view deltas</td></tr>
-    <tr><td><code>internal/store/headspaces.go</code></td><td>Hiveshares, members, invitations (+ expiry SQL)</td></tr>
+    <tr><td><code>internal/store/hiveshare.go</code></td><td>Hiveshares, members, invitations (+ expiry SQL)</td></tr>
     <tr><td><code>internal/store/metrics.go</code></td><td>Aggregates + purge</td></tr>
     <tr><td><code>migrations/001_init.sql</code></td><td>Schema + extensions pgcrypto, vector</td></tr>
     <tr><td><code>migrations/002_indexes.sql</code></td><td>HNSW + GIN + time indexes</td></tr>
@@ -453,7 +453,7 @@
     <tr>
       <td><span class="badge badge-ok">P2</span></td>
       <td>Invite expiry only in Go</td>
-      <td><code>store/headspaces.go</code></td>
+      <td><code>store/hiveshare.go</code></td>
       <td><span class="badge badge-ok">FIXED</span></td>
       <td><code>status='pending' AND expires_at &gt; NOW()</code></td>
     </tr>

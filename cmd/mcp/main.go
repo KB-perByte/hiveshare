@@ -25,7 +25,7 @@ func loadConfig() Config {
 	cfg := Config{
 		ServerURL: getenv("HIVESHARE_SERVER_URL", "http://localhost:8080"),
 		APIKey:    os.Getenv("HIVESHARE_API_KEY"),
-		// Prefer HIVESHARE_DEFAULT_HIVESHARE; HEADSPACE is a legacy alias.
+		// Use HIVESHARE_DEFAULT_HIVESHARE; HIVESHARE_DEFAULT_HEADSPACE kept for backwards compat.
 		DefaultHiveshare: firstNonEmpty(
 			os.Getenv("HIVESHARE_DEFAULT_HIVESHARE"),
 			os.Getenv("HIVESHARE_DEFAULT_HEADSPACE"),

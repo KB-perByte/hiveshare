@@ -1,0 +1,815 @@
+openapi: 3.0.3
+info:
+  title: HiveShare API
+  description: Collaborative AI memory server for engineering teams. Teammates' AI agents store and search crunched context in shared hiveshares so nobody re-reads the same ticket twice.
+  version: "1.0"
+
+servers:
+  - url: http://localhost:8080
+    description: Local / self-hosted
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: "hvs_<48 hex chars>"
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+
+    UserWithKey:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          properties:
+            api_key: { type: string, description: "Cleartext key — returned only once at registration or invite accept." }
+
+    Hiveshare:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        owner_id: { type: string, format: uuid }
+        settings: { type: object }
+        role: { type: string, enum: [all, view] }
+        member_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Member:
+      type: object
+      properties:
+        hiveshare_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [all, view] }
+        joined_at: { type: string, format: date-time }
+
+    Invitation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        hiveshare_id: { type: string, format: uuid }
+        email: { type: string }
+        invited_by: { type: string, format: uuid }
+        token: { type: string }
+        role: { type: string, enum: [all, view] }
+        status: { type: string, enum: [pending, accepted, expired] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        invite_url: { type: string }
+
+    Hive:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        hiveshare_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        user_name: { type: string }
+        source_type: { type: string, enum: [jira, github_issue, github_pr, file, url, manual] }
+        source_ref: { type: string }
+        source_url: { type: string }
+        tool: { type: string, enum: [claude, cursor, manual] }
+        content: { type: string }
+        summary: { type: string }
+        tags: { type: array, items: { type: string } }
+        metadata: { type: object }
+        views: { type: integer }
+        reuses: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    HiveSummary:
+      description: Hive without content field (used in list responses).
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        hiveshare_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        user_name: { type: string }
+        source_type: { type: string }
+        source_ref: { type: string }
+        summary: { type: string }
+        tags: { type: array, items: { type: string } }
+        views: { type: integer }
+        reuses: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    HistoryEntry:
+      type: object
+      properties:
+        history_id: { type: integer }
+        entry_id: { type: string, format: uuid }
+        hiveshare_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        action: { type: string, enum: [insert, update, delete] }
+        content: { type: string }
+        summary: { type: string }
+        has_embedding: { type: boolean }
+        tags: { type: array, items: { type: string } }
+        source_type: { type: string }
+        source_ref: { type: string }
+        tool: { type: string }
+        recorded_at: { type: string, format: date-time }
+
+    Snapshot:
+      type: object
+      properties:
+        snapshot_id: { type: integer }
+        hiveshare_id: { type: string, format: uuid }
+        created_by: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        entry_count: { type: integer }
+        created_at: { type: string, format: date-time }
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Health
+  - name: Auth
+  - name: Hiveshares
+  - name: Hives
+  - name: History
+  - name: Snapshots
+  - name: Metrics
+  - name: SSE
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      security: []
+      tags: [Health]
+      responses:
+        '200':
+          description: All systems operational
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  db: { type: string, example: ok }
+                  redis: { type: string, example: ok }
+                  commit: { type: string }
+                  build_time: { type: string, format: date-time }
+        '503':
+          description: Degraded — Postgres or Redis unreachable
+
+  /api/v1/auth/register:
+    post:
+      summary: Register a new user
+      security: []
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name]
+              properties:
+                email: { type: string, format: email, example: alice@example.com }
+                name: { type: string, example: Alice }
+      responses:
+        '201':
+          description: User created. `api_key` is returned only once — store it securely.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserWithKey' }
+        '400':
+          description: email or name missing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/auth/whoami:
+    get:
+      summary: Get authenticated user
+      tags: [Auth]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401':
+          description: Missing or invalid API key
+
+  /api/v1/hiveshares:
+    get:
+      summary: List all hiveshares for the current user
+      tags: [Hiveshares]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Hiveshare' }
+    post:
+      summary: Create a hiveshare
+      tags: [Hiveshares]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: Sprint 42 }
+                description: { type: string, example: Shared context for sprint 42 }
+      responses:
+        '201':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hiveshare' }
+        '400':
+          description: name missing
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/hiveshares/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Get a hiveshare
+      tags: [Hiveshares]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hiveshare' }
+        '404':
+          description: Not found or not a member
+    put:
+      summary: Update a hiveshare (write access required)
+      tags: [Hiveshares]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hiveshare' }
+        '403':
+          description: Write access required
+    delete:
+      summary: Delete a hiveshare (owner only)
+      tags: [Hiveshares]
+      responses:
+        '204': { description: Deleted }
+        '403': { description: Not the owner }
+        '404': { description: Not found }
+
+  /api/v1/hiveshares/{id}/invite:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Invite a user by email (write access required)
+      tags: [Hiveshares]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                role:
+                  type: string
+                  enum: [all, view]
+                  default: all
+                  description: "`all` = read/write/invite, `view` = read-only"
+      responses:
+        '201':
+          description: Invitation created. Expires in 7 days.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invitation' }
+        '400': { description: email missing }
+        '403': { description: Write access required }
+
+  /api/v1/invitations/{token}/accept:
+    parameters:
+      - name: token
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      summary: Accept an invitation (no auth required)
+      security: []
+      tags: [Hiveshares]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, description: "Display name. Defaults to invited email if omitted." }
+      responses:
+        '200':
+          description: Joined hiveshare. New users receive an `api_key`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Welcome to Sprint 42" }
+                  hiveshare_id: { type: string, format: uuid }
+                  user: { $ref: '#/components/schemas/UserWithKey' }
+        '404': { description: Invitation not found }
+        '410': { description: Invitation expired or already accepted }
+
+  /api/v1/hiveshares/{id}/members:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: List hiveshare members
+      tags: [Hiveshares]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Member' }
+        '403': { description: Not a member }
+
+  /api/v1/hiveshares/{id}/members/{userId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      summary: Remove a member (or leave yourself)
+      tags: [Hiveshares]
+      responses:
+        '204': { description: Removed }
+        '403': { description: Write access required to remove others }
+
+  /api/v1/hiveshares/{id}/hives:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: List hives (content field omitted)
+      tags: [Hives]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: source_type
+          in: query
+          schema: { type: string, enum: [jira, github_issue, github_pr, file, url, manual] }
+        - name: source_ref
+          in: query
+          schema: { type: string }
+        - name: tag
+          in: query
+          schema: { type: string }
+        - name: tool
+          in: query
+          schema: { type: string, enum: [claude, cursor, manual] }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HiveSummary' }
+    post:
+      summary: Create a hive
+      description: Embedding is generated asynchronously. If `source_ref` already exists in this hiveshare, it is auto-suffixed (e.g. `PROJ-123-2`).
+      tags: [Hives]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_type, source_ref, content]
+              properties:
+                source_type: { type: string, enum: [jira, github_issue, github_pr, file, url, manual] }
+                source_ref: { type: string, example: PROJ-123 }
+                source_url: { type: string, format: uri }
+                tool: { type: string, enum: [claude, cursor, manual], default: manual }
+                content: { type: string }
+                summary: { type: string }
+                tags: { type: array, items: { type: string } }
+                metadata: { type: object }
+      responses:
+        '201':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hive' }
+        '400': { description: content, source_type, or source_ref missing }
+        '403': { description: Write access required }
+
+  /api/v1/hiveshares/{id}/hives/{entryId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: entryId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Get a hive (includes content, increments view counter)
+      tags: [Hives]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hive' }
+        '404': { description: Not found }
+    put:
+      summary: Update a hive (write access required)
+      description: All fields optional. Updating `content` triggers re-embedding.
+      tags: [Hives]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content: { type: string }
+                summary: { type: string }
+                tags: { type: array, items: { type: string } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hive' }
+        '403': { description: Write access required }
+        '404': { description: Not found }
+    delete:
+      summary: Delete a hive (write access required)
+      tags: [Hives]
+      responses:
+        '204': { description: Deleted }
+        '403': { description: Write access required }
+        '404': { description: Not found }
+
+  /api/v1/hiveshares/{id}/hives/search:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Search hives
+      description: Uses vector (semantic) search when embeddings are available, falls back to PostgreSQL full-text search.
+      tags: [Hives]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string, example: auth refactor approach }
+                source_type: { type: string, enum: [jira, github_issue, github_pr, file, url, manual] }
+                limit: { type: integer, default: 10 }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/Hive' }
+                  count: { type: integer }
+                  query: { type: string }
+        '400': { description: query missing }
+
+  /api/v1/hiveshares/{id}/hives/copy:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Copy hives into this hiveshare
+      description: Copies hives (including embeddings) from any accessible hiveshare. Used for rollforward merges after a snapshot restore.
+      tags: [Hives]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entry_ids]
+              properties:
+                entry_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Hive' }
+        '400': { description: entry_ids missing or empty }
+        '403': { description: Not a member of source hiveshare }
+
+  /api/v1/hiveshares/{id}/hives/undelete:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Restore a deleted hive from history (write access required)
+      tags: [History]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [history_id]
+              properties:
+                history_id: { type: integer, description: "history_id from a delete action row" }
+      responses:
+        '201':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hive' }
+        '400': { description: history_id missing }
+        '404': { description: History record not found }
+
+  /api/v1/hiveshares/{id}/hives/{entryId}/history:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: entryId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: List version history for a hive
+      tags: [History]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HistoryEntry' }
+
+  /api/v1/hiveshares/{id}/hives/{entryId}/rollback:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: entryId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Rollback a hive to a prior version (write access required)
+      tags: [History]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [history_id]
+              properties:
+                history_id: { type: integer }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hive' }
+        '400': { description: history_id missing }
+        '404': { description: Entry or history version not found }
+
+  /api/v1/hiveshares/{id}/snapshots:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: List snapshots
+      tags: [Snapshots]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Snapshot' }
+    post:
+      summary: Create a snapshot (write access required)
+      description: Point-in-time copy of all hives including embeddings.
+      tags: [Snapshots]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: before-cleanup }
+                description: { type: string }
+      responses:
+        '201':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Snapshot' }
+        '400': { description: name missing, or hiveshare too large to snapshot }
+        '403': { description: Write access required }
+
+  /api/v1/hiveshares/{id}/snapshots/{snapshotId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: snapshotId
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Get snapshot with frozen entries
+      tags: [Snapshots]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot: { $ref: '#/components/schemas/Snapshot' }
+                  entries: { type: array, items: { type: object } }
+        '404': { description: Not found }
+    delete:
+      summary: Delete a snapshot and its frozen entries (write access required)
+      tags: [Snapshots]
+      responses:
+        '204': { description: Deleted }
+        '404': { description: Not found }
+
+  /api/v1/hiveshares/{id}/snapshots/{snapshotId}/restore:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: snapshotId
+        in: path
+        required: true
+        schema: { type: integer }
+    post:
+      summary: Restore snapshot to a new hiveshare (write access required)
+      description: Creates a new hiveshare from the snapshot. The original hiveshare is not modified.
+      tags: [Snapshots]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, description: "Name for the new hiveshare. Defaults to '(restored)'." }
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hiveshare: { $ref: '#/components/schemas/Hiveshare' }
+                  entries_restored: { type: integer }
+        '404': { description: Snapshot not found }
+
+  /api/v1/hiveshares/{id}/metrics:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Get hiveshare metrics
+      tags: [Metrics]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hiveshare: { type: object }
+                  memory: { type: object }
+                  collaboration: { type: object }
+                  coverage: { type: object }
+                  activity: { type: object }
+
+  /api/v1/metrics/me:
+    get:
+      summary: Get personal metrics for the current user
+      tags: [Metrics]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_entries: { type: integer }
+                  total_searches: { type: integer }
+                  hiveshares_owned: { type: integer }
+                  hiveshares_joined: { type: integer }
+                  total_reuses_given: { type: integer }
+
+  /api/v1/hiveshares/{id}/stream:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: SSE real-time event stream
+      description: |
+        Long-lived Server-Sent Events connection. Events are fanned out via Redis pub/sub.
+
+        **Event types:** `connected`, `hive_added`, `hive_updated`, `hive_rolled_back`, `hive_undeleted`
+
+        Keepalive comments (`: keepalive`) are sent every 25 seconds.
+      tags: [SSE]
+      responses:
+        '200':
+          description: SSE stream (do not apply the 30s request timeout)
+          content:
+            text/event-stream:
+              schema: { type: string }

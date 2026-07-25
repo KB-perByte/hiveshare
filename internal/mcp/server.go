@@ -145,7 +145,7 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]inte
 		return s.client.CreateHiveshare(ctx, name, stringArg(args, "description"))
 
 	case "list_hiveshares":
-		return s.client.ListHeadspaces(ctx)
+		return s.client.ListHiveshares(ctx)
 
 	case "search_hives":
 		query := stringArg(args, "query")

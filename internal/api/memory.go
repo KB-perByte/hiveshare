@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/KB-perByte/hiveshare/internal/embed"
 	"github.com/KB-perByte/hiveshare/internal/models"
 	"github.com/KB-perByte/hiveshare/internal/realtime"
@@ -81,7 +80,7 @@ func (h *HiveHandler) List(w http.ResponseWriter, r *http.Request) {
 		Offset:     offset,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not list hives", err)
 		return
 	}
 	if entries == nil {
@@ -151,7 +150,7 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if n >= 9 || !store.IsUniqueViolation(err) {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeDBError(w, "could not create hive", err)
 			return
 		}
 	}
@@ -189,7 +188,7 @@ func (h *HiveHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	entry, err := h.mem.Get(r.Context(), entryID, hsID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "entry not found")
+		writeDBError(w, "hive not found", err)
 		return
 	}
 
@@ -224,10 +223,13 @@ func (h *HiveHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Summary string   `json:"summary"`
 		Tags    []string `json:"tags"`
 	}
-	decodeJSON(r, &req)
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
 	entry, err := h.mem.Update(r.Context(), entryID, hsID, req.Content, req.Summary, req.Tags)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not update hive", err)
 		return
 	}
 	if req.Content != "" {
@@ -256,7 +258,7 @@ func (h *HiveHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := h.mem.Delete(r.Context(), entryID, hsID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not delete hive", err)
 		return
 	}
 	if !found {
@@ -312,7 +314,7 @@ func (h *HiveHandler) Search(w http.ResponseWriter, r *http.Request) {
 		entries, err = h.mem.SearchFullText(r.Context(), hsID, req.Query, req.SourceType, req.Limit)
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "search failed", err)
 		return
 	}
 	if entries == nil {
@@ -358,7 +360,7 @@ func (h *HiveHandler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	versions, err := h.history.ListVersions(r.Context(), entryID, hsID, limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not load history", err)
 		return
 	}
 	if versions == nil {
@@ -387,7 +389,7 @@ func (h *HiveHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	entry, hasEmb, err := h.history.Rollback(r.Context(), entryID, hsID, req.HistoryID)
 	if err != nil {
-		writeHistoryErr(w, "rollback failed", err)
+		writeDBError(w, "rollback failed", err)
 		return
 	}
 	if !hasEmb {
@@ -422,7 +424,7 @@ func (h *HiveHandler) Undelete(w http.ResponseWriter, r *http.Request) {
 	}
 	entry, hasEmb, err := h.history.Undelete(r.Context(), req.HistoryID, hsID)
 	if err != nil {
-		writeHistoryErr(w, "undelete failed", err)
+		writeDBError(w, "undelete failed", err)
 		return
 	}
 	if !hasEmb {
@@ -468,7 +470,7 @@ func (h *HiveHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not create snapshot", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, snap)
@@ -481,7 +483,7 @@ func (h *HiveHandler) ListSnapshots(w http.ResponseWriter, r *http.Request) {
 	}
 	snaps, err := h.history.ListSnapshots(r.Context(), hsID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not list snapshots", err)
 		return
 	}
 	if snaps == nil {
@@ -502,7 +504,7 @@ func (h *HiveHandler) GetSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	snap, entries, err := h.history.GetSnapshot(r.Context(), snapshotID, hsID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "snapshot not found")
+		writeDBError(w, "snapshot not found", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -534,7 +536,7 @@ func (h *HiveHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.history.RestoreSnapshot(r.Context(), snapshotID, hsID, u.ID, req.Name)
 	if err != nil {
-		writeHistoryErr(w, "restore failed", err)
+		writeDBError(w, "restore failed", err)
 		return
 	}
 	for _, id := range result.NullEmbeddings {
@@ -565,7 +567,7 @@ func (h *HiveHandler) DeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	deleted, err := h.history.DeleteSnapshot(r.Context(), snapshotID, hsID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not delete snapshot", err)
 		return
 	}
 	if !deleted {
@@ -596,7 +598,7 @@ func (h *HiveHandler) CopyEntries(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "not a member of source hiveshare")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not copy hives", err)
 		return
 	}
 	var entries []*models.Hive
@@ -614,11 +616,3 @@ func (h *HiveHandler) CopyEntries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, entries)
 }
 
-// writeHistoryErr maps pgx.ErrNoRows → 404 and everything else → 500.
-func writeHistoryErr(w http.ResponseWriter, prefix string, err error) {
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusNotFound, prefix+": not found")
-		return
-	}
-	writeError(w, http.StatusInternalServerError, prefix+": "+err.Error())
-}

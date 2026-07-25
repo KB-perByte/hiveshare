@@ -27,7 +27,7 @@ func (h *HiveshareHandler) List(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	list, err := h.hs.ListForUser(r.Context(), u.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not list hiveshares", err)
 		return
 	}
 	if list == nil {
@@ -48,7 +48,7 @@ func (h *HiveshareHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	hs, err := h.hs.Create(r.Context(), req.Name, req.Description, u.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not create hiveshare", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, hs)
@@ -78,17 +78,20 @@ func (h *HiveshareHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	role, err := h.hs.IsMember(r.Context(), id, u.ID)
 	if err != nil || !models.CanWrite(role) {
-		writeError(w, http.StatusForbidden, "all access required")
+		writeError(w, http.StatusForbidden, "write access required")
 		return
 	}
 	var req struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
-	decodeJSON(r, &req)
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
 	hs, err := h.hs.Update(r.Context(), id, req.Name, req.Description)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not update hiveshare", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, hs)
@@ -112,7 +115,7 @@ func (h *HiveshareHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.hs.Delete(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not delete hiveshare", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -155,7 +158,7 @@ func (h *HiveshareHandler) Invite(w http.ResponseWriter, r *http.Request) {
 		Role:        req.Role,
 	}
 	if err := h.hs.CreateInvitation(r.Context(), inv); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not create invitation", err)
 		return
 	}
 
@@ -215,7 +218,11 @@ func (h *HiveshareHandler) AcceptInvite(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.hs.AddMember(r.Context(), inv.HiveshareID, user.ID, inv.InvitedBy, inv.Role); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		if store.IsUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "already a member of this hiveshare")
+			return
+		}
+		writeDBError(w, "could not add member", err)
 		return
 	}
 	_ = h.hs.AcceptInvitation(r.Context(), token)
@@ -250,7 +257,7 @@ func (h *HiveshareHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	members, err := h.hs.ListMembers(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not list members", err)
 		return
 	}
 	for _, m := range members {
@@ -277,7 +284,10 @@ func (h *HiveshareHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusForbidden, "all access required")
 		return
 	}
-	_ = h.hs.RemoveMember(r.Context(), id, targetID)
+	if err := h.hs.RemoveMember(r.Context(), id, targetID); err != nil {
+		writeDBError(w, "could not remove member", err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -295,7 +305,7 @@ func (h *HiveshareHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	m, err := h.metrics.HiveshareMetrics(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeDBError(w, "could not load metrics", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m)

@@ -64,6 +64,8 @@ func NewRouter(
 	met := NewMetricsHandler(metricsStore)
 
 	r.Get("/health", healthHandler(pool, rdb))
+	r.Get("/openapi.yaml", serveOpenAPI)
+	r.Get("/docs", serveDocs)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// public

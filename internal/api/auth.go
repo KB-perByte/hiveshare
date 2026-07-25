@@ -31,7 +31,11 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.users.Create(r.Context(), req.Email, req.Name)
 	if err != nil {
-		writeError(w, http.StatusConflict, "email already registered or internal error")
+		if store.IsUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "email already registered")
+			return
+		}
+		writeDBError(w, "could not create account", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, user)
