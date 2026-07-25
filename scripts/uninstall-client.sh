@@ -22,15 +22,15 @@ echo
 # ── paths ─────────────────────────────────────────────────────────────────────
 
 INSTALL_DIR="${HOME}/.local/bin"
-BINARY="${INSTALL_DIR}/hshare"
-VERSION_FILE="${INSTALL_DIR}/hshare.version"
+BINARY="${INSTALL_DIR}/hiveshare"
+VERSION_FILE="${INSTALL_DIR}/hiveshare.version"
 CONFIG_FILE="${HOME}/.config/hiveshare/config.json"
 CONFIG_DIR="${HOME}/.config/hiveshare"
 
 # ── check anything is installed ───────────────────────────────────────────────
 
 if [[ ! -f "$BINARY" ]]; then
-    warn "hshare not found at $BINARY — nothing to remove."
+    warn "hiveshare not found at $BINARY — nothing to remove."
     exit 0
 fi
 
@@ -39,7 +39,7 @@ VERSION="unknown"
 echo "  Found: $BINARY  (commit: $VERSION)"
 echo
 
-ask_yn "Uninstall hshare?" "n" || { echo "Aborted."; exit 0; }
+ask_yn "Uninstall hiveshare?" "n" || { echo "Aborted."; exit 0; }
 
 # ── remove binary ─────────────────────────────────────────────────────────────
 

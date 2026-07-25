@@ -29,7 +29,7 @@ mcp:
 	go build $(GOFLAGS) -o $(BINDIR)/hiveshare-mcp ./cmd/mcp
 
 cli:
-	go build $(GOFLAGS) -o $(BINDIR)/hshare ./cmd/hshare
+	go build $(GOFLAGS) -o $(BINDIR)/hiveshare ./cmd/hiveshare
 
 deps:
 	go mod tidy
@@ -85,8 +85,8 @@ psql:
 # ── Install CLI ───────────────────────────────────────────────────────────────
 
 install: cli
-	@cp $(BINDIR)/hshare /usr/local/bin/hshare
-	@echo "hshare installed to /usr/local/bin/hshare"
+	@cp $(BINDIR)/hiveshare /usr/local/bin/hiveshare
+	@echo "hiveshare installed to /usr/local/bin/hiveshare"
 
 install-mcp: mcp
 	@cp $(BINDIR)/hiveshare-mcp /usr/local/bin/hiveshare-mcp
@@ -108,7 +108,7 @@ release:
 	    echo "  Building $$PLATFORM..."; \
 	    GOOS=$$GOOS GOARCH=$$GOARCH go build $(RELEASE_LDFLAGS) -o $$OUT/hiveshare-server ./cmd/server; \
 	    GOOS=$$GOOS GOARCH=$$GOARCH go build $(RELEASE_LDFLAGS) -o $$OUT/hiveshare-mcp    ./cmd/mcp; \
-	    GOOS=$$GOOS GOARCH=$$GOARCH go build $(RELEASE_LDFLAGS) -o $$OUT/hshare           ./cmd/hshare; \
+	    GOOS=$$GOOS GOARCH=$$GOARCH go build $(RELEASE_LDFLAGS) -o $$OUT/hiveshare       ./cmd/hiveshare; \
 	    tar -czf dist/hiveshare_$${PLATFORM}.tar.gz -C $$OUT .; \
 	    echo "  → dist/hiveshare_$${PLATFORM}.tar.gz"; \
 	  done; \
@@ -143,9 +143,9 @@ help:
 	@echo "  make server         Build API server (embeds git commit + build time)"
 	@echo "  make server-linux   Cross-compile API for EC2 Ubuntu amd64"
 	@echo "  make mcp            Build MCP sidecar"
-	@echo "  make cli            Build hshare CLI"
+	@echo "  make cli            Build hiveshare CLI"
 	@echo "  make migrate        Apply SQL migrations"
-	@echo "  make install        Install hshare to /usr/local/bin"
+	@echo "  make install        Install hiveshare to /usr/local/bin"
 	@echo "  make install-mcp    Install hiveshare-mcp to /usr/local/bin"
 	@echo "  make docker-up      Start postgres + redis"
 	@echo "  make docker-down    Stop postgres + redis"

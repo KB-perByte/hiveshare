@@ -9,7 +9,7 @@
 ```mermaid
 graph TB
     subgraph Clients["Client Layer"]
-        CLI["hshare CLI"]
+        CLI["hiveshare CLI"]
         MCP["MCP Sidecar\n(Claude / Cursor)"]
     end
 
@@ -164,8 +164,8 @@ graph LR
 C4Context
     title HiveShare — Current Single-Node Deployment
 
-    Person(dev, "Developer", "Uses Claude Code or hshare CLI")
-    Person(tm, "Teammate", "Uses Claude Code or hshare CLI")
+    Person(dev, "Developer", "Uses Claude Code or hiveshare CLI")
+    Person(tm, "Teammate", "Uses Claude Code or hiveshare CLI")
 
     System_Boundary(server, "Single Server (docker-compose)") {
         System(api, "hiveshare-server", "Go: REST + SSE + embed workers + health")

@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-// Client is the HTTP client used by all hshare CLI commands to talk to the
+// Client is the HTTP client used by all hiveshare CLI commands to talk to the
 // hiveshare server. It attaches the API key as a Bearer token on every request.
 type Client struct {
 	BaseURL string
@@ -20,7 +20,7 @@ type Client struct {
 func newClient() (*Client, error) {
 	cfg := loadConfig()
 	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("not logged in — run: hshare auth register --email you@example.com --name 'You'")
+		return nil, fmt.Errorf("not logged in — run: hiveshare auth register --email you@example.com --name 'You'")
 	}
 	return &Client{BaseURL: cfg.ServerURL, APIKey: cfg.APIKey}, nil
 }

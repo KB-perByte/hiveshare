@@ -8,7 +8,7 @@ Collaborative AI memory server for engineering teams. Teammates' AI agents store
 cmd/
   server/     → API server binary (main.go)
   mcp/        → MCP sidecar binary (used by Claude Code / Cursor)
-  hshare/     → CLI binary (main.go + client.go + config.go)
+  hiveshare/     → CLI binary (main.go + client.go + config.go)
 internal/
   api/        → HTTP handlers (router.go, auth.go, memory.go=HiveHandler, …)
   mcp/        → MCP protocol + server + client
@@ -32,7 +32,7 @@ make smoke-test / smoke-test-full / integration-test
 make release             # cross-compile linux+darwin amd64+arm64 → dist/
 ```
 
-Binaries: `bin/hiveshare-server`, `bin/hiveshare-mcp`, `bin/hshare`
+Binaries: `bin/hiveshare-server`, `bin/hiveshare-mcp`, `bin/hiveshare`
 
 ## Key env vars (server)
 

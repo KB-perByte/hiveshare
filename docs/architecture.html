@@ -100,8 +100,8 @@
   <rect x="16" y="16" width="200" height="200" rx="10" fill="#1e2133" stroke="#3a3d55" stroke-width="1.5"/>
   <text x="116" y="38" text-anchor="middle" fill="#8b8fa8" font-size="10" font-weight="600" letter-spacing="1">CLIENT PROCESSES</text>
   <rect x="32" y="52" width="168" height="48" rx="6" fill="#252836" stroke="#6c72f5" stroke-width="1"/>
-  <text x="116" y="72" text-anchor="middle" fill="#e2e4f0" font-size="12" font-weight="600">hshare CLI</text>
-  <text x="116" y="88" text-anchor="middle" fill="#8b8fa8" font-size="10">cmd/hshare · REST + SSE</text>
+  <text x="116" y="72" text-anchor="middle" fill="#e2e4f0" font-size="12" font-weight="600">hiveshare CLI</text>
+  <text x="116" y="88" text-anchor="middle" fill="#8b8fa8" font-size="10">cmd/hiveshare · REST + SSE</text>
   <rect x="32" y="112" width="168" height="48" rx="6" fill="#252836" stroke="#6c72f5" stroke-width="1"/>
   <text x="116" y="132" text-anchor="middle" fill="#e2e4f0" font-size="12" font-weight="600">hiveshare-mcp</text>
   <text x="116" y="148" text-anchor="middle" fill="#8b8fa8" font-size="10">cmd/mcp · stdio JSON-RPC</text>
@@ -317,7 +317,7 @@
   <thead><tr><th>Path</th><th>Responsibility</th></tr></thead>
   <tbody>
     <tr><td><code>cmd/server/main.go</code></td><td>Wire pool, Redis, hub, workers, flusher, TTL job, HTTP server</td></tr>
-    <tr><td><code>cmd/hshare/</code></td><td>CLI: auth, hiveshare, memory, invite, members, stream, metrics</td></tr>
+    <tr><td><code>cmd/hiveshare/</code></td><td>CLI: auth, hiveshare, memory, invite, members, stream, metrics</td></tr>
     <tr><td><code>cmd/mcp/</code></td><td>stdio MCP; reads <code>~/.config/hiveshare/config.json</code> or env</td></tr>
     <tr><td><code>internal/api/router.go</code></td><td>chi routes, middleware, health</td></tr>
     <tr><td><code>internal/api/middleware.go</code></td><td>Bearer → user; DB lookup each request</td></tr>

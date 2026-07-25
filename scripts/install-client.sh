@@ -55,10 +55,10 @@ echo
 # ── paths ─────────────────────────────────────────────────────────────────────
 
 INSTALL_DIR="${HOME}/.local/bin"
-VERSION_FILE="${INSTALL_DIR}/hshare.version"
+VERSION_FILE="${INSTALL_DIR}/hiveshare.version"
 CONFIG_DIR="${HOME}/.config/hiveshare"
 CONFIG_FILE="${CONFIG_DIR}/config.json"
-BINARY="${INSTALL_DIR}/hshare"
+BINARY="${INSTALL_DIR}/hiveshare"
 BACKUP_BINARY="${BINARY}.bak"
 BACKUP_CONFIG="${CONFIG_FILE}.bak"
 ROLLBACK_NEEDED=0
@@ -150,7 +150,7 @@ step "Building"
 BUILD_TMP="$(mktemp)"
 trap 'rm -f "$BUILD_TMP"; cleanup' EXIT
 
-go build -ldflags="$LDFLAGS" -o "$BUILD_TMP" ./cmd/hshare \
+go build -ldflags="$LDFLAGS" -o "$BUILD_TMP" ./cmd/hiveshare \
     || die "Build failed."
 
 mv -f "$BUILD_TMP" "$BINARY"
@@ -252,7 +252,7 @@ if [[ "$KEEP_CONFIG" -eq 0 ]]; then
     else
         # Offline: preserve existing key or leave blank
         API_KEY="${EXISTING_API_KEY:-}"
-        [[ -z "$API_KEY" ]] && warn "No API key set — run 'hshare auth register' once the server is available."
+        [[ -z "$API_KEY" ]] && warn "No API key set — run 'hiveshare auth register' once the server is available."
     fi
 
     cat > "$CONFIG_FILE" <<EOF
@@ -286,9 +286,9 @@ if [[ -n "$FINAL_KEY" && -n "$FINAL_URL" ]]; then
             -H "Authorization: Bearer ${FINAL_KEY}" 2>/dev/null || echo "000")"
         if [[ "$HTTP_STATUS" == "401" ]]; then
             warn "API key rejected (401). The key in $CONFIG_FILE may be wrong."
-            warn "Update it with: hshare auth register"
+            warn "Update it with: hiveshare auth register"
         elif [[ "$HTTP_STATUS" == "000" ]]; then
-            warn "Server unreachable — verification skipped. Run 'hshare auth status' when the server is up."
+            warn "Server unreachable — verification skipped. Run 'hiveshare auth status' when the server is up."
         else
             warn "Unexpected response (HTTP $HTTP_STATUS). Check server logs."
         fi
@@ -308,11 +308,11 @@ echo "  Binary  : $BINARY  (commit: $NEW_COMMIT)"
 echo "  Config  : $CONFIG_FILE"
 echo
 echo "  Quick start:"
-echo "    hshare hiveshare list           # list your hiveshares"
-echo "    hshare hiveshare create <name>  # create a new hiveshare"
-echo "    hshare hiveshare use <id>       # set active hiveshare"
-echo "    hshare hive add --content '…'   # save a hive"
-echo "    hshare hive search '<query>'    # search hives"
-echo "    hshare hive history <id>        # version history"
-echo "    hshare hiveshare snapshot list  # list snapshots"
+echo "    hiveshare list           # list your hiveshares"
+echo "    hiveshare create <name>  # create a new hiveshare"
+echo "    hiveshare use <id>       # set active hiveshare"
+echo "    hiveshare hive add --content '…'   # save a hive"
+echo "    hiveshare hive search '<query>'    # search hives"
+echo "    hiveshare hive history <id>        # version history"
+echo "    hiveshare snapshot list  # list snapshots"
 echo

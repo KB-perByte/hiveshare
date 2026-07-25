@@ -23,13 +23,16 @@ func main() {
 
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "hshare",
+		Use:     "hiveshare",
 		Short:   "HiveShare — collaborative AI memory CLI",
 		Version: version.Commit + " (" + version.BuildTime + ")",
 	}
 	root.AddCommand(
 		authCmd(),
-		hiveshareCmd(),
+		createCmd(),
+		listCmd(),
+		useCmd(),
+		snapshotCmd(),
 		hiveCmd(),
 		inviteCmd(),
 		membersCmd(),
@@ -104,10 +107,8 @@ func authCmd() *cobra.Command {
 
 // ── Hiveshare ─────────────────────────────────────────────────────────────────
 
-func hiveshareCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "hiveshare", Short: "Manage hiveshares", Aliases: []string{"hs"}}
-
-	create := &cobra.Command{
+func createCmd() *cobra.Command {
+	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a new hiveshare",
 		Args:  cobra.ExactArgs(1),
@@ -124,13 +125,16 @@ func hiveshareCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("Created hiveshare: %s (%s)\n", result["name"], result["id"])
-			fmt.Printf("Run 'hshare hiveshare use %s' to set it as default\n", result["id"])
+			fmt.Printf("Run 'hiveshare use %s' to set it as default\n", result["id"])
 			return nil
 		},
 	}
-	create.Flags().StringP("description", "d", "", "Description")
+	cmd.Flags().StringP("description", "d", "", "Description")
+	return cmd
+}
 
-	list := &cobra.Command{
+func listCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "list",
 		Short: "List all your hiveshares",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -157,8 +161,10 @@ func hiveshareCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
 
-	use := &cobra.Command{
+func useCmd() *cobra.Command {
+	return &cobra.Command{
 		Use:   "use <id>",
 		Short: "Set a hiveshare as the default",
 		Args:  cobra.ExactArgs(1),
@@ -181,9 +187,6 @@ func hiveshareCmd() *cobra.Command {
 			return nil
 		},
 	}
-
-	cmd.AddCommand(create, list, use, snapshotCmd())
-	return cmd
 }
 
 func snapshotCmd() *cobra.Command {
@@ -336,7 +339,7 @@ func snapshotCmd() *cobra.Command {
 			hs, _ := result["hiveshare"].(map[string]interface{})
 			fmt.Printf("Restored to new hiveshare: %s (%s)\n", hs["name"], hs["id"])
 			fmt.Printf("Entries restored: %.0f\n", result["entries_restored"])
-			fmt.Printf("Run 'hshare hiveshare use %s' to switch to it\n", hs["id"])
+			fmt.Printf("Run 'hiveshare use %s' to switch to it\n", hs["id"])
 			return nil
 		},
 	}
@@ -392,7 +395,7 @@ func hiveCmd() *cobra.Command {
 				hsID = cfg.DefaultHiveshare
 			}
 			if hsID == "" {
-				return fmt.Errorf("no hiveshare set; use --hiveshare or 'hshare hiveshare use <id>'")
+				return fmt.Errorf("no hiveshare set; use --hiveshare or 'hiveshare use <id>'")
 			}
 			sourceType, _ := cmd.Flags().GetString("source-type")
 			sourceRef, _ := cmd.Flags().GetString("source-ref")
@@ -836,9 +839,9 @@ func streamCmd() *cobra.Command {
 				}
 			}
 			if err := scanner.Err(); err != nil {
-				return fmt.Errorf("stream closed: %w (server restarted, network drop, or proxy idle timeout — re-run hshare stream)", err)
+				return fmt.Errorf("stream closed: %w (server restarted, network drop, or proxy idle timeout — re-run hiveshare stream)", err)
 			}
-			return fmt.Errorf("stream closed by server (re-run hshare stream)")
+			return fmt.Errorf("stream closed by server (re-run hiveshare stream)")
 		},
 	}
 }
@@ -875,7 +878,7 @@ func metricsCmd() *cobra.Command {
 				hsID = cfg.DefaultHiveshare
 			}
 			if hsID == "" {
-				return fmt.Errorf("no hiveshare set; use --hiveshare or 'hshare hiveshare use <id>'")
+				return fmt.Errorf("no hiveshare set; use --hiveshare or 'hiveshare use <id>'")
 			}
 
 			var m map[string]interface{}

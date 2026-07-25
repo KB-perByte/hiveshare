@@ -35,7 +35,7 @@ sequenceDiagram
 
 - **Isolated hiveshares** — one per project, story, or sprint; fully separate hive stores
 - **Invite by email** — token-based, no SMTP required; teammates get their own API key on accept
-- **Live sync** — `hshare stream` shows new entries from any teammate in real time (SSE; one Redis sub per hiveshare)
+- **Live sync** — `hiveshare stream` shows new entries from any teammate in real time (SSE; one Redis sub per hiveshare)
 - **Semantic search** — OpenAI or Ollama embeddings (async on write, HNSW index); falls back to PostgreSQL full-text if not configured
 - **MCP integration** — Claude Code and Cursor can search and save memory automatically without you doing anything
 - **Metrics** — reuse rate, top contributors, source coverage, 7-day activity
@@ -72,25 +72,25 @@ curl -sSL https://raw.githubusercontent.com/KB-perByte/hiveshare/main/install.sh
 Or with Go installed:
 
 ```bash
-go install github.com/KB-perByte/hiveshare/cmd/hshare@latest
+go install github.com/KB-perByte/hiveshare/cmd/hiveshare@latest
 ```
 
 ### 3 — Register and create a hiveshare
 
 ```bash
-hshare auth register --email you@example.com --name "Maverick"
+hiveshare auth register --email you@example.com --name "Maverick"
 # Prints your API key once and saves it to ~/.config/hiveshare/config.json
 # (server stores only SHA-256 of the key — save it now)
 
-hshare hiveshare create "PROJ-42 Sprint"
-hshare hiveshare list          # note the ID
-hshare hiveshare use <uuid>
+hiveshare create "PROJ-42 Sprint"
+hiveshare list          # note the ID
+hiveshare use <uuid>
 ```
 
 ### 4 — Invite a teammate
 
 ```bash
-hshare invite bob@example.com
+hiveshare invite bob@example.com
 # Prints an invite link:
 #   https://your-server/api/v1/invitations/<token>/accept
 ```
@@ -127,13 +127,13 @@ Restart Claude Code. Claude now has five tools: `search_hives`, `add_hive`, `lis
 
 **Maverick's terminal:**
 ```bash
-hshare stream          # live tail — keep this open
+hiveshare stream          # live tail — keep this open
 ```
 
 **Rooster saves a hive:**
 ```bash
 echo "PROJ-42: the JWT middleware needs to validate tokens before forwarding..." | \
-  hshare hive add --source-type jira --source-ref PROJ-42 --tool claude
+  hiveshare hive add --source-type jira --source-ref PROJ-42 --tool claude
 ```
 
 Maverick's terminal immediately shows:
@@ -143,7 +143,7 @@ Maverick's terminal immediately shows:
 
 **Maverick searches:**
 ```bash
-hshare hive search "JWT validation"
+hiveshare hive search "JWT validation"
 ```
 
 ---
@@ -151,32 +151,32 @@ hshare hive search "JWT validation"
 ## CLI reference
 
 ```
-hshare auth register --email EMAIL --name NAME [--server URL]
-hshare auth status
+hiveshare auth register --email EMAIL --name NAME [--server URL]
+hiveshare auth status
 
-hshare hiveshare create NAME [--description TEXT]
-hshare hiveshare list
-hshare hiveshare use ID
+hiveshare create NAME [--description TEXT]
+hiveshare list
+hiveshare use ID
 
-hshare hive add --source-ref REF [--source-type TYPE] [--tool TOOL] [< file]
-hshare hive search QUERY [--limit N] [--source-type TYPE]
-hshare hive list [--source-type TYPE] [--limit N]
-hshare hive history ENTRY_ID [--limit N]
-hshare hive rollback ENTRY_ID --version HISTORY_ID
-hshare hive undelete --version HISTORY_ID
-hshare hive copy --to TARGET_HS --entries ID1,ID2
+hiveshare hive add --source-ref REF [--source-type TYPE] [--tool TOOL] [< file]
+hiveshare hive search QUERY [--limit N] [--source-type TYPE]
+hiveshare hive list [--source-type TYPE] [--limit N]
+hiveshare hive history ENTRY_ID [--limit N]
+hiveshare hive rollback ENTRY_ID --version HISTORY_ID
+hiveshare hive undelete --version HISTORY_ID
+hiveshare hive copy --to TARGET_HS --entries ID1,ID2
 
-hshare hiveshare snapshot create [--name NAME]
-hshare hiveshare snapshot list
-hshare hiveshare snapshot show ID
-hshare hiveshare snapshot restore ID [--name NAME]
-hshare hiveshare snapshot delete ID
+hiveshare snapshot create [--name NAME]
+hiveshare snapshot list
+hiveshare snapshot show ID
+hiveshare snapshot restore ID [--name NAME]
+hiveshare snapshot delete ID
 
-hshare invite EMAIL [--role all|view]
-hshare members list
+hiveshare invite EMAIL [--role all|view]
+hiveshare members list
 
-hshare stream
-hshare metrics [--me]
+hiveshare stream
+hiveshare metrics [--me]
 ```
 
 Source types: `jira`, `github_issue`, `github_pr`, `file`, `url`, `manual`  
@@ -219,7 +219,7 @@ Roles: `all` (invite + read + write) · `view` (read-only)
 ## Architecture
 
 ```
-hshare CLI  ──┐
+hiveshare CLI  ──┐
                ├──  REST + SSE  ──  hiveshare-server (Go)
 MCP sidecar ──┘                    │  embed workers, health
                             ┌──────┴──────┐
@@ -253,7 +253,7 @@ make deps build
 # Binaries land in ./bin/
 #   hiveshare-server  — API server
 #   hiveshare-mcp     — MCP sidecar for Claude Code / Cursor
-#   hshare            — CLI
+#   hiveshare            — CLI
 ```
 
 ### Development

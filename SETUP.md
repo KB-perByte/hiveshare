@@ -59,40 +59,40 @@ make cli
 # or: make install  (copies to /usr/local/bin)
 
 # Register (API key is shown once — server stores SHA-256 only)
-./bin/hshare auth register --email you@example.com --name "Maverick"
+./bin/hiveshare auth register --email you@example.com --name "Maverick"
 
 # Create a hiveshare
-./bin/hshare hiveshare create "Auth Refactor Sprint"
-./bin/hshare hiveshare list
+./bin/hiveshare create "Auth Refactor Sprint"
+./bin/hiveshare list
 
 # Set it as active (saves to ~/.config/hiveshare/config.json)
-./bin/hshare hiveshare use <hiveshare-id>
+./bin/hiveshare use <hiveshare-id>
 
 # Add a hive from a tool session
 echo "PROJ-123 is about refactoring the JWT middleware..." | \
-  ./bin/hshare hive add --source-type jira --source-ref PROJ-123 --tool claude
+  ./bin/hiveshare hive add --source-type jira --source-ref PROJ-123 --tool claude
 
 # Search
-./bin/hshare hive search "JWT authentication"
+./bin/hiveshare hive search "JWT authentication"
 
 # History / rollback
-./bin/hshare hive history <entry-id>
-./bin/hshare hive rollback <entry-id> --version <history-id>
+./bin/hiveshare hive history <entry-id>
+./bin/hiveshare hive rollback <entry-id> --version <history-id>
 
 # Snapshots
-./bin/hshare hiveshare snapshot create --name "before-refactor"
-./bin/hshare hiveshare snapshot list
-./bin/hshare hiveshare snapshot restore <snapshot-id> --name "restored copy"
+./bin/hiveshare snapshot create --name "before-refactor"
+./bin/hiveshare snapshot list
+./bin/hiveshare snapshot restore <snapshot-id> --name "restored copy"
 
 # Invite a colleague
-./bin/hshare invite alice@example.com
+./bin/hiveshare invite alice@example.com
 
 # Metrics
-./bin/hshare metrics
-./bin/hshare metrics --me
+./bin/hiveshare metrics
+./bin/hiveshare metrics --me
 
 # Stream live updates (open in another terminal)
-./bin/hshare stream
+./bin/hiveshare stream
 ```
 
 ## MCP Setup (Claude Code)
@@ -151,7 +151,7 @@ Show me metrics for this hiveshare.
 
 ## Invite Flow
 
-1. Team member A runs: `hshare invite bob@example.com`
+1. Team member A runs: `hiveshare invite bob@example.com`
 2. An invite link is printed: `http://localhost:8080/api/v1/invitations/<token>/accept`
 3. Rooster opens the link (or POSTs to it with `{"name": "Rooster"}`)
 4. Rooster gets a new account (API key returned once) and is added to the hiveshare
@@ -173,7 +173,7 @@ Invites are rejected in SQL when `status != 'pending'` or `expires_at` has passe
 hiveshare/
 ├── cmd/server/     API server (embed workers, view flusher, history purge, event TTL)
 ├── cmd/mcp/        MCP sidecar (connect to Claude/Cursor)
-├── cmd/hshare/     CLI
+├── cmd/hiveshare/     CLI
 ├── internal/
 │   ├── api/        HTTP handlers + router (rate limit, timeout, /health)
 │   ├── embed/      Embedding backends + async worker pool

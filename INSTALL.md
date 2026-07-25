@@ -126,7 +126,7 @@ chmod +x scripts/install-client.sh
 
 The script will:
 
-1. Build the `hshare` binary to `~/.local/bin/hshare`
+1. Build the `hiveshare` binary to `~/.local/bin/hiveshare`
 2. Prompt for the server URL
 3. Register a new account **or** accept an existing API key
 4. Write `~/.config/hiveshare/config.json`
@@ -164,9 +164,9 @@ Fields can also be set via environment variables:
 ### Verifying the client
 
 ```bash
-hshare --help
-hshare auth status
-hshare hiveshare list
+hiveshare --help
+hiveshare auth status
+hiveshare list
 ```
 
 ---
@@ -202,7 +202,7 @@ chmod +x scripts/uninstall-client.sh
 ```
 
 The script will:
-1. Remove the `hshare` binary and version file
+1. Remove the `hiveshare` binary and version file
 2. Ask whether to remove the config file (`~/.config/hiveshare/config.json`, contains your API key)
 3. Ask whether to remove the `~/.local/bin` PATH entry from your shell profile
 
@@ -232,9 +232,9 @@ git pull
 **Migration fails with "extension vector does not exist"**
 - You are not using the `pgvector/pgvector:pg16` image or pgvector is not installed. See [pgvector installation](https://github.com/pgvector/pgvector#installation).
 
-**`hshare: command not found`**
+**`hiveshare: command not found`**
 - `~/.local/bin` is not in PATH. See the PATH note above.
 
 **API key rejected (401)**
 - Confirm the key in `~/.config/hiveshare/config.json` matches what the server issued.
-- Re-register: `hshare auth register`
+- Re-register: `hiveshare auth register`

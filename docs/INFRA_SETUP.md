@@ -25,7 +25,7 @@ cd ~/Work/sandbox/hiveshare
 make deps build
 
 ls bin/
-# hiveshare-server   hiveshare-mcp   hshare
+# hiveshare-server   hiveshare-mcp   hiveshare
 ```
 
 ---
@@ -39,7 +39,7 @@ Your machine
   ├── Docker Compose  →  postgres :5432, redis :6379
   ├── hiveshare-server :8080
   └── ngrok tunnel  →  https://abc123.ngrok-free.app
-                              └── Teammate's Claude Code / hshare CLI
+                              └── Teammate's Claude Code / hiveshare CLI
 ```
 
 ### Step 1 — Start infrastructure
@@ -78,21 +78,21 @@ OPENAI_API_KEY=sk-... \
 ### Step 4 — Register and create a hiveshare
 
 ```bash
-./bin/hshare auth register \
+./bin/hiveshare auth register \
   --server https://abc123.ngrok-free.app \
   --email you@example.com \
   --name "Maverick"
 # saves hvs_... key to ~/.config/hiveshare/config.json
 
-./bin/hshare hiveshare create "Sprint 42"
-./bin/hshare hiveshare list        # note the UUID
-./bin/hshare hiveshare use <uuid>
+./bin/hiveshare create "Sprint 42"
+./bin/hiveshare list        # note the UUID
+./bin/hiveshare use <uuid>
 ```
 
 ### Step 5 — Invite your teammate
 
 ```bash
-./bin/hshare invite bob@example.com
+./bin/hiveshare invite bob@example.com
 # Prints:
 #   Invite link: https://abc123.ngrok-free.app/api/v1/invitations/<token>/accept
 ```
@@ -125,13 +125,13 @@ EOF
 
 **Maverick's terminal** (keep running):
 ```bash
-./bin/hshare stream
+./bin/hiveshare stream
 ```
 
 **Rooster's terminal:**
 ```bash
 echo "PROJ-42: JWT middleware skips validation on /internal/* routes." | \
-  ./bin/hshare memory add \
+  ./bin/hiveshare hive add \
     --source-type jira \
     --source-ref PROJ-42 \
     --tool claude
@@ -144,7 +144,7 @@ Maverick's stream immediately shows:
 
 **Maverick searches Rooster's memory:**
 ```bash
-./bin/hshare memory search "JWT validation"
+./bin/hiveshare hive search "JWT validation"
 ```
 
 ---
@@ -337,15 +337,15 @@ sudo systemctl reload nginx
 
 ```bash
 # On your local machine
-./bin/hshare auth register \
+./bin/hiveshare auth register \
   --server https://hiveshare.yourdomain.com \
   --email you@example.com \
   --name "Maverick"
 
-./bin/hshare hiveshare create "Sprint 42"
-./bin/hshare hiveshare use <uuid>
+./bin/hiveshare create "Sprint 42"
+./bin/hiveshare use <uuid>
 
-./bin/hshare invite bob@example.com
+./bin/hiveshare invite bob@example.com
 # → prints invite link using https://hiveshare.yourdomain.com/...
 ```
 
@@ -490,15 +490,15 @@ oc get route hiveshare
 ```bash
 BASE_URL=https://hiveshare-hiveshare.apps.YOUR_CLUSTER_DOMAIN
 
-./bin/hshare auth register \
+./bin/hiveshare auth register \
   --server $BASE_URL \
   --email you@example.com \
   --name "Maverick"
 
-./bin/hshare hiveshare create "Sprint 42"
-./bin/hshare hiveshare use <uuid>
+./bin/hiveshare create "Sprint 42"
+./bin/hiveshare use <uuid>
 
-./bin/hshare invite bob@example.com
+./bin/hiveshare invite bob@example.com
 ```
 
 Rooster accepts the invite link and configures his client with:
@@ -581,11 +581,11 @@ Verify in Claude: `"List my hiveshares"` — Claude should call `list_hiveshares
 [ ] Maverick invites Rooster  →  link contains the server URL (not localhost)
 [ ] Rooster accepts  →  gets his own hvs_ key
 [ ] Rooster adds a memory entry via CLI
-[ ] Maverick's `hshare stream` terminal shows live update within 2 seconds
+[ ] Maverick's `hiveshare stream` terminal shows live update within 2 seconds
 [ ] Maverick searches  →  finds Rooster's entry
 [ ] Both have MCP loaded in Claude Code
 [ ] Claude calls search_memory before re-crunching a known ticket
-[ ] `hshare metrics` shows entries from both users
+[ ] `hiveshare metrics` shows entries from both users
 ```
 
 ---
