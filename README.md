@@ -4,10 +4,29 @@
 
 When you and your teammates use Claude Code or Cursor on the same Jira ticket or GitHub issue, every session re-crunches the same context from scratch. HiveShare fixes that: anything one person's AI agent processes gets stored as searchable memory in a shared **hiveshare**, so everyone else's agent reuses it immediately — no re-reading, no re-summarising.
 
-```
-Alice crunches PROJ-42 with Claude  →  hive saved to hiveshare
-Bob opens PROJ-42 with Cursor       →  MCP tool loads Alice's hive automatically
-                                        Bob's agent starts with full context
+```mermaid
+sequenceDiagram
+    actor Alice as 🧑‍💻 Alice · Claude Code
+    participant MCP as hiveshare MCP
+    participant API as hiveshare server
+    participant DB as PostgreSQL + pgvector
+    participant Redis as Redis
+    actor Bob as 👨‍💻 Bob · Cursor
+
+    Alice->>MCP: add_hive(PROJ-42, crunched context)
+    MCP->>API: POST /hiveshares/{id}/hives
+    API->>DB: INSERT hive · embedding = NULL
+    API-->>Redis: PUBLISH hive_added
+    API-->>Alice: 201 · hive saved
+    DB-->>DB: async embed worker · UPDATE embedding
+
+    Note over DB: indexed · searchable · team-visible
+
+    Bob->>MCP: search_hives("PROJ-42 auth flow")
+    MCP->>API: POST /hives/search
+    API->>DB: HNSW cosine similarity scan
+    DB-->>API: Alice's hive · score 0.97
+    API-->>Bob: full context · zero re-reading
 ```
 
 ---

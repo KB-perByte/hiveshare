@@ -167,6 +167,43 @@ hshare hiveshare list
 
 ---
 
+## Uninstalling
+
+### Server
+
+```bash
+chmod +x scripts/uninstall-server.sh
+sudo ./scripts/uninstall-server.sh   # or without sudo if installed as non-root
+```
+
+The script will:
+1. Stop and disable the systemd service (if present)
+2. Remove the binary and version file
+3. Ask whether to remove the config file (contains DB/Redis credentials)
+4. Ask whether to remove the systemd unit file
+
+The PostgreSQL database and Redis data are **not** touched. To drop the database too, pass `--nuke`:
+
+```bash
+sudo ./scripts/uninstall-server.sh --nuke
+```
+
+`--nuke` terminates active DB connections, then drops the database entirely. You must type the database name at the confirmation prompt — there is no undo.
+
+### Client
+
+```bash
+chmod +x scripts/uninstall-client.sh
+./scripts/uninstall-client.sh
+```
+
+The script will:
+1. Remove the `hshare` binary and version file
+2. Ask whether to remove the config file (`~/.config/hiveshare/config.json`, contains your API key)
+3. Ask whether to remove the `~/.local/bin` PATH entry from your shell profile
+
+---
+
 ## Upgrading
 
 Pull the latest code and re-run the installer — it will rebuild and overwrite the binary. The config and migrations are not touched (migrations are idempotent).
