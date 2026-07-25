@@ -94,6 +94,16 @@ func (c *APIClient) GetContext(ctx context.Context, hiveshareID, sourceRef strin
 	return result, err
 }
 
+// CreateHiveshare creates a new hiveshare owned by the authenticated user.
+func (c *APIClient) CreateHiveshare(ctx context.Context, name, description string) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	err := c.do(ctx, http.MethodPost, "/api/v1/hiveshares", map[string]interface{}{
+		"name":        name,
+		"description": description,
+	}, &result)
+	return result, err
+}
+
 // GetMetrics returns the analytics snapshot for the given hiveshare.
 func (c *APIClient) GetMetrics(ctx context.Context, hiveshareID string) (interface{}, error) {
 	var result interface{}

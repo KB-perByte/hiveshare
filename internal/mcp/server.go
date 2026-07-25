@@ -132,7 +132,18 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]inte
 		hsID = s.defaultHS
 	}
 
+	if hsID == "" && name != "create_hiveshare" && name != "list_hiveshares" {
+		return nil, Errorf(-32602, "no hiveshare selected — create one first with create_hiveshare, or pass hiveshare_id")
+	}
+
 	switch name {
+	case "create_hiveshare":
+		name := stringArg(args, "name")
+		if name == "" {
+			return nil, Errorf(-32602, "name is required")
+		}
+		return s.client.CreateHiveshare(ctx, name, stringArg(args, "description"))
+
 	case "list_hiveshares":
 		return s.client.ListHeadspaces(ctx)
 
@@ -181,6 +192,18 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]inte
 // tools returns the MCP tool definitions.
 func tools() []Tool {
 	return []Tool{
+		{
+			Name:        "create_hiveshare",
+			Description: "Create a new hiveshare for your team. Do this first if list_hiveshares returns empty.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"name":        {Type: "string", Description: "Name for the hiveshare"},
+					"description": {Type: "string", Description: "Optional description"},
+				},
+				Required: []string{"name"},
+			},
+		},
 		{
 			Name:        "search_hives",
 			Description: "Search hives in a hiveshare using semantic or full-text search. Use this before asking the user about context — the hive may already have what you need.",
