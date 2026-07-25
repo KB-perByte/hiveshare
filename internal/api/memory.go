@@ -8,17 +8,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5"
 	"github.com/KB-perByte/hiveshare/internal/embed"
 	"github.com/KB-perByte/hiveshare/internal/models"
 	"github.com/KB-perByte/hiveshare/internal/realtime"
 	"github.com/KB-perByte/hiveshare/internal/store"
 )
-
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
 
 type HiveHandler struct {
 	mem      *store.HiveStore
@@ -155,7 +150,7 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			break
 		}
-		if n >= 9 || !isUniqueViolation(err) {
+		if n >= 9 || !store.IsUniqueViolation(err) {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -392,7 +387,7 @@ func (h *HiveHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	entry, hasEmb, err := h.history.Rollback(r.Context(), entryID, hsID, req.HistoryID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "rollback failed: "+err.Error())
+		writeHistoryErr(w, "rollback failed", err)
 		return
 	}
 	if !hasEmb {
@@ -427,7 +422,7 @@ func (h *HiveHandler) Undelete(w http.ResponseWriter, r *http.Request) {
 	}
 	entry, hasEmb, err := h.history.Undelete(r.Context(), req.HistoryID, hsID)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "undelete failed: "+err.Error())
+		writeHistoryErr(w, "undelete failed", err)
 		return
 	}
 	if !hasEmb {
@@ -469,6 +464,10 @@ func (h *HiveHandler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	snap, err := h.history.CreateSnapshot(r.Context(), hsID, u.ID, req.Name, req.Description)
 	if err != nil {
+		if errors.Is(err, store.ErrSnapshotTooLarge) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -526,13 +525,16 @@ func (h *HiveHandler) RestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
 	}
-	decodeJSON(r, &req)
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
 	if req.Name == "" {
 		req.Name = "(restored)"
 	}
 	result, err := h.history.RestoreSnapshot(r.Context(), snapshotID, hsID, u.ID, req.Name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "restore failed: "+err.Error())
+		writeHistoryErr(w, "restore failed", err)
 		return
 	}
 	for _, id := range result.NullEmbeddings {
@@ -610,4 +612,13 @@ func (h *HiveHandler) CopyEntries(w http.ResponseWriter, r *http.Request) {
 		EventType:   "copy",
 	})
 	writeJSON(w, http.StatusCreated, entries)
+}
+
+// writeHistoryErr maps pgx.ErrNoRows → 404 and everything else → 500.
+func writeHistoryErr(w http.ResponseWriter, prefix string, err error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, prefix+": not found")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, prefix+": "+err.Error())
 }

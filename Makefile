@@ -38,8 +38,8 @@ deps:
 # ── Database ─────────────────────────────────────────────────────────────────
 
 POSTGRES_URL ?= postgres://hiveshare:hiveshare@localhost:5432/hiveshare?sslmode=disable
-
-POSTGRES_CONTAINER ?= $(shell $(CONTAINER_RUNTIME) compose ps --format '{{.Names}}' 2>/dev/null | grep hiveshare_postgres | head -1)
+# Compose service name (stable across project prefixes / renamed containers).
+POSTGRES_SERVICE ?= postgres
 
 migrate:
 	@echo "Applying migrations..."
@@ -48,14 +48,14 @@ migrate:
 	        echo "  Running $$f..."; \
 	        psql "$(POSTGRES_URL)" -f "$$f"; \
 	    done; \
-	elif [ -n "$(POSTGRES_CONTAINER)" ]; then \
+	elif $(CONTAINER_RUNTIME) compose ps --status running $(POSTGRES_SERVICE) >/dev/null 2>&1; then \
 	    for f in migrations/*.sql; do \
-	        echo "  Running $$f (via container)..."; \
-	        $(CONTAINER_RUNTIME) exec -i $(POSTGRES_CONTAINER) \
+	        echo "  Running $$f (via compose $(POSTGRES_SERVICE))..."; \
+	        $(CONTAINER_RUNTIME) compose exec -T $(POSTGRES_SERVICE) \
 	            psql -U hiveshare -d hiveshare -f - < "$$f"; \
 	    done; \
 	else \
-	    echo "Error: psql not found and no postgres container running"; \
+	    echo "Error: psql not found and compose service '$(POSTGRES_SERVICE)' is not running"; \
 	    exit 1; \
 	fi
 	@echo "Migrations done."
@@ -79,8 +79,8 @@ dev-clean:
 	$(CONTAINER_RUNTIME) compose down -v
 
 psql:
-	@echo "**INFO**: Found Container '$(POSTGRES_CONTAINER)' using it to '$(CONTAINER_RUNTIME) exec' for a psql prompt"
-	$(CONTAINER_RUNTIME) exec -it $(POSTGRES_CONTAINER) psql -U hiveshare -d hiveshare
+	@echo "**INFO**: Opening psql via '$(CONTAINER_RUNTIME) compose exec $(POSTGRES_SERVICE)'"
+	$(CONTAINER_RUNTIME) compose exec -it $(POSTGRES_SERVICE) psql -U hiveshare -d hiveshare
 	
 # ── Install CLI ───────────────────────────────────────────────────────────────
 

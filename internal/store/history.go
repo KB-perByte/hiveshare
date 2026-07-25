@@ -8,14 +8,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 	"github.com/KB-perByte/hiveshare/internal/models"
 )
-
-// ErrForbidden is returned when the caller lacks membership on a source hiveshare.
-var ErrForbidden = errors.New("forbidden")
 
 type HistoryStore struct {
 	db *pgxpool.Pool
@@ -23,11 +19,6 @@ type HistoryStore struct {
 
 func NewHistoryStore(db *pgxpool.Pool) *HistoryStore {
 	return &HistoryStore{db: db}
-}
-
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // ── Per-entry history ────────────────────────────────────────────────────────
@@ -127,7 +118,7 @@ func (s *HistoryStore) Undelete(ctx context.Context, historyID int64, hiveshareI
 		if err == nil {
 			return &e, hasEmbedding, nil
 		}
-		if n >= 9 || !isUniqueViolation(err) {
+		if n >= 9 || !IsUniqueViolation(err) {
 			return nil, false, fmt.Errorf("undelete entry: %w", err)
 		}
 	}
@@ -168,7 +159,21 @@ func (s *HistoryStore) PurgeByCount(ctx context.Context, maxVersions int) (int64
 
 // ── Snapshots ────────────────────────────────────────────────────────────────
 
+// maxSnapshotEntries caps snapshot size so embeddings for huge hiveshares
+// cannot balloon disk/memory without an explicit opt-in later.
+const maxSnapshotEntries = 10000
+
 func (s *HistoryStore) CreateSnapshot(ctx context.Context, hiveshareID, userID uuid.UUID, name, description string) (*models.Snapshot, error) {
+	var count int
+	if err := s.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM hives WHERE hiveshare_id = $1`, hiveshareID,
+	).Scan(&count); err != nil {
+		return nil, fmt.Errorf("count hives for snapshot: %w", err)
+	}
+	if count > maxSnapshotEntries {
+		return nil, fmt.Errorf("%w: %d entries (max %d)", ErrSnapshotTooLarge, count, maxSnapshotEntries)
+	}
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -233,7 +238,7 @@ func (s *HistoryStore) ListSnapshots(ctx context.Context, hiveshareID uuid.UUID)
 	return result, rows.Err()
 }
 
-func (s *HistoryStore) GetSnapshot(ctx context.Context, snapshotID int64, hiveshareID uuid.UUID) (*models.Snapshot, []*models.HistoryEntry, error) {
+func (s *HistoryStore) GetSnapshot(ctx context.Context, snapshotID int64, hiveshareID uuid.UUID) (*models.Snapshot, []*models.SnapshotEntry, error) {
 	var snap models.Snapshot
 	err := s.db.QueryRow(ctx,
 		`SELECT s.snapshot_id, s.hiveshare_id, s.created_by, s.name, s.description, s.created_at,
@@ -259,9 +264,9 @@ func (s *HistoryStore) GetSnapshot(ctx context.Context, snapshotID int64, hivesh
 	}
 	defer rows.Close()
 
-	var entries []*models.HistoryEntry
+	var entries []*models.SnapshotEntry
 	for rows.Next() {
-		e := &models.HistoryEntry{HiveshareID: snap.HiveshareID}
+		e := &models.SnapshotEntry{HiveshareID: snap.HiveshareID}
 		if err := rows.Scan(&e.EntryID, &e.Content, &e.Summary, &e.HasEmbedding,
 			&e.Tags, &e.Metadata, &e.SourceType, &e.SourceRef, &e.SourceURL, &e.Tool); err != nil {
 			return nil, nil, err
@@ -370,6 +375,9 @@ type CopyResult struct {
 	HasEmbedding bool
 }
 
+// CopyEntries copies hives into targetHiveshareID.
+// ponytail: O(n) round-trips per entry_id (fine for small lists); bulk
+// INSERT…SELECT FROM unnest($1::uuid[]) if copy batches grow past ~100.
 func (s *HistoryStore) CopyEntries(ctx context.Context, targetHiveshareID, userID uuid.UUID, entryIDs []uuid.UUID) ([]*CopyResult, error) {
 	if len(entryIDs) == 0 {
 		return nil, nil
@@ -439,7 +447,7 @@ func (s *HistoryStore) CopyEntries(ctx context.Context, targetHiveshareID, userI
 			if err == nil {
 				break
 			}
-			if n >= 9 || !isUniqueViolation(err) {
+			if n >= 9 || !IsUniqueViolation(err) {
 				return nil, fmt.Errorf("copy entry %s: %w", eid, err)
 			}
 		}

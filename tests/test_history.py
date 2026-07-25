@@ -1,4 +1,4 @@
-"""Integration tests for memory history, snapshots, rollback, and copy.
+"""Integration tests for hive history, snapshots, rollback, and copy.
 
 Run: pytest tests/ -v
 Requires: make dev (server + postgres + redis running)
@@ -11,6 +11,25 @@ import pytest
 from conftest import auth_header
 
 TIMEOUT = 10
+
+
+def _create_hive(api_url, user, hiveshare_id, source_ref, content, **extra):
+    body = {
+        "source_type": "manual",
+        "source_ref": source_ref,
+        "content": content,
+        "tool": "manual",
+        "tags": [],
+        **extra,
+    }
+    resp = requests.post(
+        f"{api_url}/hiveshares/{hiveshare_id}/hives",
+        json=body,
+        headers=auth_header(user),
+        timeout=TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 class TestEntryHistory:
@@ -26,25 +45,46 @@ class TestEntryHistory:
         assert len(versions) >= 1
         assert versions[-1]["action"] == "insert"
 
-    def test_update_generates_history(self, api_url, user_a, hiveshare_id, hive_entry):
+    def test_update_generates_history(self, api_url, user_a, hiveshare_id):
+        entry = _create_hive(
+            api_url, user_a, hiveshare_id,
+            source_ref=f"update-hist-{time.time_ns()}",
+            content="Content before update",
+            summary="Before",
+        )
         requests.put(
-            f"{api_url}/hiveshares/{hiveshare_id}/hives/{hive_entry['id']}",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{entry['id']}",
             json={"content": "Updated content", "summary": "Updated", "tags": ["test", "updated"]},
             headers=auth_header(user_a), timeout=TIMEOUT,
         ).raise_for_status()
 
         resp = requests.get(
-            f"{api_url}/hiveshares/{hiveshare_id}/hives/{hive_entry['id']}/history",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{entry['id']}/history",
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
         resp.raise_for_status()
         versions = resp.json()
         actions = [v["action"] for v in versions]
         assert "update" in actions
+        # Async embed must not produce a second update row.
+        assert actions.count("update") == 1
 
-    def test_rollback_restores_content(self, api_url, user_a, hiveshare_id, hive_entry):
+    def test_rollback_restores_content(self, api_url, user_a, hiveshare_id):
+        original = "Rollback original content"
+        entry = _create_hive(
+            api_url, user_a, hiveshare_id,
+            source_ref=f"rollback-{time.time_ns()}",
+            content=original,
+            summary="Original",
+        )
+        requests.put(
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{entry['id']}",
+            json={"content": "Mutated content", "summary": "Mutated", "tags": ["x"]},
+            headers=auth_header(user_a), timeout=TIMEOUT,
+        ).raise_for_status()
+
         resp = requests.get(
-            f"{api_url}/hiveshares/{hiveshare_id}/hives/{hive_entry['id']}/history",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{entry['id']}/history",
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
         resp.raise_for_status()
@@ -52,28 +92,21 @@ class TestEntryHistory:
         insert_version = [v for v in versions if v["action"] == "insert"][-1]
 
         resp = requests.post(
-            f"{api_url}/hiveshares/{hiveshare_id}/hives/{hive_entry['id']}/rollback",
+            f"{api_url}/hiveshares/{hiveshare_id}/hives/{entry['id']}/rollback",
             json={"history_id": insert_version["history_id"]},
             headers=auth_header(user_a), timeout=TIMEOUT,
         )
         resp.raise_for_status()
         restored = resp.json()
-        assert restored["content"] == "Original content for testing history"
+        assert restored["content"] == original
 
     def test_delete_and_undelete(self, api_url, user_a, hiveshare_id):
-        create_resp = requests.post(
-            f"{api_url}/hiveshares/{hiveshare_id}/hives",
-            json={
-                "source_type": "manual",
-                "source_ref": "delete-test",
-                "content": "Entry to be deleted and restored",
-                "tool": "manual",
-                "tags": [],
-            },
-            headers=auth_header(user_a), timeout=TIMEOUT,
+        entry = _create_hive(
+            api_url, user_a, hiveshare_id,
+            source_ref=f"delete-test-{time.time_ns()}",
+            content="Entry to be deleted and restored",
         )
-        create_resp.raise_for_status()
-        entry_id = create_resp.json()["id"]
+        entry_id = entry["id"]
 
         requests.delete(
             f"{api_url}/hiveshares/{hiveshare_id}/hives/{entry_id}",
@@ -147,6 +180,9 @@ class TestSnapshots:
         assert "snapshot" in data
         assert "entries" in data
         assert len(data["entries"]) >= 1
+        # SnapshotEntry has no history fields.
+        assert "history_id" not in data["entries"][0]
+        assert "action" not in data["entries"][0]
 
     def test_restore_creates_new_hiveshare(self, api_url, user_a, hiveshare_id):
         list_resp = requests.get(

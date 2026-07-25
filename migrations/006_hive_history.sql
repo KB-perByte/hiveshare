@@ -55,9 +55,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- embedding is intentionally omitted from UPDATE OF: the async embed worker
+-- fills it after insert and must not create a spurious "update" history row.
 DROP TRIGGER IF EXISTS hive_history_trigger ON hives;
 CREATE TRIGGER hive_history_trigger
-    AFTER INSERT OR UPDATE OF content, summary, tags, metadata, embedding OR DELETE
+    AFTER INSERT OR UPDATE OF content, summary, tags, metadata OR DELETE
     ON hives
     FOR EACH ROW EXECUTE FUNCTION record_hive_history();
 
