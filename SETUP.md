@@ -57,7 +57,7 @@ make cli
 # or: make install  (copies to /usr/local/bin)
 
 # Register (API key is shown once — server stores SHA-256 only)
-./bin/hshare auth register --email you@example.com --name "Alice"
+./bin/hshare auth register --email you@example.com --name "Maverick"
 
 # Create a hiveshare
 ./bin/hshare hiveshare create "Auth Refactor Sprint"
@@ -142,9 +142,9 @@ Show me metrics for this hiveshare.
 
 1. Team member A runs: `hshare invite bob@example.com`
 2. An invite link is printed: `http://localhost:8080/api/v1/invitations/<token>/accept`
-3. Bob opens the link (or POSTs to it with `{"name": "Bob"}`)
-4. Bob gets a new account (API key returned once) and is added to the hiveshare
-5. Bob saves the key in CLI/MCP config and starts sharing memory
+3. Rooster opens the link (or POSTs to it with `{"name": "Rooster"}`)
+4. Rooster gets a new account (API key returned once) and is added to the hiveshare
+5. Rooster saves the key in CLI/MCP config and starts sharing memory
 
 Invites are rejected in SQL when `status != 'pending'` or `expires_at` has passed (default 7 days).
 

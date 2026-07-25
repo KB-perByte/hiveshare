@@ -6,27 +6,27 @@ When you and your teammates use Claude Code or Cursor on the same Jira ticket or
 
 ```mermaid
 sequenceDiagram
-    actor Alice as 🧑‍💻 Alice · Claude Code
+    actor Maverick as 🧑‍💻 Maverick · Claude Code
     participant MCP as hiveshare MCP
     participant API as hiveshare server
     participant DB as PostgreSQL + pgvector
     participant Redis as Redis
-    actor Bob as 👨‍💻 Bob · Cursor
+    actor Rooster as 👨‍💻 Rooster · Cursor
 
-    Alice->>MCP: add_hive(PROJ-42, crunched context)
+    Maverick->>MCP: add_hive(PROJ-42, crunched context)
     MCP->>API: POST /hiveshares/{id}/hives
     API->>DB: INSERT hive · embedding = NULL
     API-->>Redis: PUBLISH hive_added
-    API-->>Alice: 201 · hive saved
+    API-->>Maverick: 201 · hive saved
     DB-->>DB: async embed worker · UPDATE embedding
 
     Note over DB: indexed · searchable · team-visible
 
-    Bob->>MCP: search_hives("PROJ-42 auth flow")
+    Rooster->>MCP: search_hives("PROJ-42 auth flow")
     MCP->>API: POST /hives/search
     API->>DB: HNSW cosine similarity scan
-    DB-->>API: Alice's hive · score 0.97
-    API-->>Bob: full context · zero re-reading
+    DB-->>API: Maverick's hive · score 0.97
+    API-->>Rooster: full context · zero re-reading
 ```
 
 ---
@@ -76,7 +76,7 @@ go install github.com/KB-perByte/hiveshare/cmd/hshare@latest
 ### 3 — Register and create a hiveshare
 
 ```bash
-hshare auth register --email you@example.com --name "Alice"
+hshare auth register --email you@example.com --name "Maverick"
 # Prints your API key once and saves it to ~/.config/hiveshare/config.json
 # (server stores only SHA-256 of the key — save it now)
 
@@ -93,7 +93,7 @@ hshare invite bob@example.com
 #   https://your-server/api/v1/invitations/<token>/accept
 ```
 
-Bob opens the link (or POSTs to it), gets his API key, and runs step 2–3 with the same server URL.
+Rooster opens the link (or POSTs to it), gets his API key, and runs step 2–3 with the same server URL.
 
 ### 5 — Connect Claude Code
 
@@ -123,23 +123,23 @@ Restart Claude Code. Claude now has five tools: `search_hives`, `add_hive`, `lis
 
 ### 6 — Test it
 
-**Alice's terminal:**
+**Maverick's terminal:**
 ```bash
 hshare stream          # live tail — keep this open
 ```
 
-**Bob saves a hive:**
+**Rooster saves a hive:**
 ```bash
 echo "PROJ-42: the JWT middleware needs to validate tokens before forwarding..." | \
   hshare hive add --source-type jira --source-ref PROJ-42 --tool claude
 ```
 
-Alice's terminal immediately shows:
+Maverick's terminal immediately shows:
 ```
-[10:41:02] + hive added: jira/PROJ-42 by Bob
+[10:41:02] + hive added: jira/PROJ-42 by Rooster
 ```
 
-**Alice searches:**
+**Maverick searches:**
 ```bash
 hshare hive search "JWT validation"
 ```
