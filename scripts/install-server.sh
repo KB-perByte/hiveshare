@@ -158,6 +158,7 @@ if [[ -f "$ENV_FILE" && "$UPGRADING" -eq 1 ]]; then
         ok "Keeping existing config."
         # shellcheck disable=SC1090
         source "$ENV_FILE"
+        DB_URL="${DATABASE_URL:-}"
     fi
 fi
 
@@ -211,6 +212,11 @@ fi
 # ── validate connectivity before touching anything ────────────────────────────
 
 step "Validating connectivity"
+
+# Extract password from DB_URL so psql never prompts interactively
+_pg_tmp="${DB_URL#*://}"; _pg_tmp="${_pg_tmp%%/*}"
+_pg_userinfo="${_pg_tmp%%@*}"
+[[ "$_pg_userinfo" == *:* ]] && export PGPASSWORD="${_pg_userinfo##*:}"
 
 PSQL_ERR="$(psql "$DB_URL" -c '\q' 2>&1)" || {
     echo "  Connection string: $DB_URL"
