@@ -41,7 +41,7 @@ jobs:
               GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="$LDFLAGS" \
                 -o "${OUT}/hiveshare-mcp" ./cmd/mcp
               GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="$LDFLAGS" \
-                -o "${OUT}/hshare" ./cmd/hshare
+                -o "${OUT}/hiveshare" ./cmd/hiveshare
 
               tar -czf "dist/hiveshare_${PLATFORM}.tar.gz" -C "$OUT" .
               echo "Built dist/hiveshare_${PLATFORM}.tar.gz"
@@ -94,6 +94,6 @@ jobs:
 
             **`go install` (requires Go 1.22+):**
             ```bash
-            go install github.com/${{ github.repository }}/cmd/hshare@${{ github.ref_name }}
+            go install github.com/${{ github.repository }}/cmd/hiveshare@${{ github.ref_name }}
             go install github.com/${{ github.repository }}/cmd/mcp@${{ github.ref_name }}
             ```

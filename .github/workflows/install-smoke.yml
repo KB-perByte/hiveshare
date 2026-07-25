@@ -63,11 +63,11 @@ jobs:
       - name: Install server
         run: go install ./cmd/server
 
-      - name: Install hshare CLI
-        run: go install ./cmd/hshare
+      - name: Install hiveshare CLI
+        run: go install ./cmd/hiveshare
 
-      - name: Smoke test — hshare --help
-        run: hshare --help
+      - name: Smoke test — hiveshare --help
+        run: hiveshare --help
 
       - name: Smoke test — server health
         run: |
