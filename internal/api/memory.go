@@ -227,14 +227,16 @@ func (h *HiveHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if req.Content == "" {
+		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
 	entry, err := h.mem.Update(r.Context(), entryID, hsID, req.Content, req.Summary, req.Tags)
 	if err != nil {
 		writeDBError(w, "could not update hive", err)
 		return
 	}
-	if req.Content != "" {
-		h.worker.Enqueue(embed.Job{EntryID: entry.ID, Content: req.Content})
-	}
+	h.worker.Enqueue(embed.Job{EntryID: entry.ID, Content: req.Content})
 	_ = h.hub.Publish(r.Context(), models.StreamEvent{
 		Type:        "hive_updated",
 		HiveshareID: hsID,

@@ -66,8 +66,14 @@ func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*m
 	for rows.Next() {
 		var k string
 		var v int
-		rows.Scan(&k, &v)
+		if err := rows.Scan(&k, &v); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		m.Hive.BySourceType[k] = v
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	rows.Close()
 
@@ -80,8 +86,14 @@ func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*m
 	for rows.Next() {
 		var k string
 		var v int
-		rows.Scan(&k, &v)
+		if err := rows.Scan(&k, &v); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		m.Hive.ByTool[k] = v
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	rows.Close()
 
@@ -110,8 +122,14 @@ func (s *MetricsStore) HiveshareMetrics(ctx context.Context, hsID uuid.UUID) (*m
 	}
 	for rows.Next() {
 		var c models.ContributorStat
-		rows.Scan(&c.UserID, &c.Name, &c.Entries, &c.ReusesReceived)
+		if err := rows.Scan(&c.UserID, &c.Name, &c.Entries, &c.ReusesReceived); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		m.Collab.TopContributors = append(m.Collab.TopContributors, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	rows.Close()
 

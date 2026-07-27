@@ -61,8 +61,11 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 		"model": e.Model,
 		"input": text,
 	})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://api.openai.com/v1/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("openai embed: build request: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+e.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -103,8 +106,11 @@ func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 		"model":  e.Model,
 		"prompt": text,
 	})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		e.BaseURL+"/api/embeddings", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("ollama embed: build request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)

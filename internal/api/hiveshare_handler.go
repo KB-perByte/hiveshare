@@ -207,12 +207,12 @@ func (h *HiveshareHandler) AcceptInvite(w http.ResponseWriter, r *http.Request) 
 	user, err := us.GetByEmail(r.Context(), inv.Email)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) && !isNotFound(err) {
-			writeError(w, http.StatusInternalServerError, "lookup failed: "+err.Error())
+			writeDBError(w, "lookup failed", err)
 			return
 		}
 		user, err = us.Create(r.Context(), inv.Email, req.Name)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not create user: "+err.Error())
+			writeDBError(w, "could not create user", err)
 			return
 		}
 	}

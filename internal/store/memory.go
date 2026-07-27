@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 	"github.com/KB-perByte/hiveshare/internal/models"
@@ -108,8 +109,11 @@ func (s *HiveStore) Get(ctx context.Context, id, hiveshareID uuid.UUID) (*models
 		 JOIN users u ON u.id = me.user_id
 		 WHERE me.id = $1 AND me.hiveshare_id = $2`, id, hiveshareID,
 	)
-	if err != nil || len(rows) == 0 {
+	if err != nil {
 		return nil, fmt.Errorf("get memory entry: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("get memory entry: %w", pgx.ErrNoRows)
 	}
 	return rows[0], nil
 }

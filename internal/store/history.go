@@ -164,8 +164,14 @@ func (s *HistoryStore) PurgeByCount(ctx context.Context, maxVersions int) (int64
 const maxSnapshotEntries = 10000
 
 func (s *HistoryStore) CreateSnapshot(ctx context.Context, hiveshareID, userID uuid.UUID, name, description string) (*models.Snapshot, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
 	var count int
-	if err := s.db.QueryRow(ctx,
+	if err := tx.QueryRow(ctx,
 		`SELECT COUNT(*) FROM hives WHERE hiveshare_id = $1`, hiveshareID,
 	).Scan(&count); err != nil {
 		return nil, fmt.Errorf("count hives for snapshot: %w", err)
@@ -173,12 +179,6 @@ func (s *HistoryStore) CreateSnapshot(ctx context.Context, hiveshareID, userID u
 	if count > maxSnapshotEntries {
 		return nil, fmt.Errorf("%w: %d entries (max %d)", ErrSnapshotTooLarge, count, maxSnapshotEntries)
 	}
-
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
 
 	var snap models.Snapshot
 	err = tx.QueryRow(ctx,

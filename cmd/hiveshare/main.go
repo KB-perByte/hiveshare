@@ -63,7 +63,11 @@ func authCmd() *cobra.Command {
 			}, &result); err != nil {
 				return err
 			}
-			cfg.APIKey = result["api_key"].(string)
+			key, _ := result["api_key"].(string)
+			if key == "" {
+				return fmt.Errorf("registration succeeded but no api_key in response")
+			}
+			cfg.APIKey = key
 			if err := saveConfig(cfg); err != nil {
 				return err
 			}
