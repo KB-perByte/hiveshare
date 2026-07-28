@@ -2,6 +2,8 @@
 
 HiveShare is a shared memory server for engineering teams. When your AI agent (Claude, Cursor) reads a Jira ticket or GitHub PR, the processed context gets saved to a hiveshare. Every teammate's agent can reuse it instantly — no re-reading, no re-summarising.
 
+> **Want to test interactions?** See [TUTORIAL.md](TUTORIAL.md) for a hands-on walkthrough — curl commands, MCP agent prompts, collaboration round-trips, rate limit tests, and a quick checklist to confirm everything is wired up.
+
 ---
 
 ## How the pieces fit together

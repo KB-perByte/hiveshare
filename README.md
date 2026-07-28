@@ -274,7 +274,7 @@ MCP sidecar ──┘                    │  embed workers, health
 - List endpoints omit full `content` (use Get/Search for body text)
 - Ops: `GET /health` checks Postgres + Redis
 
-See [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) for the full onboarding guide covering all user types (team owner, CLI developer, MCP-only, server setup). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams, scale analysis, and the V2/V3 roadmap. See [`API.md`](API.md) for the full HTTP reference. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides.
+See [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) for the full onboarding guide covering all user types (team owner, CLI developer, MCP-only, server setup). See [`docs/TUTORIAL.md`](docs/TUTORIAL.md) for a hands-on walkthrough of every flow with curl, CLI, and MCP agent prompts. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams, scale analysis, and the V2/V3 roadmap. See [`API.md`](API.md) for the full HTTP reference. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides.
 
 ---
 
