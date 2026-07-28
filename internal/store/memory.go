@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/KB-perByte/hiveshare/internal/models"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
-	"github.com/KB-perByte/hiveshare/internal/models"
 )
 
 type HiveStore struct {
@@ -207,6 +207,87 @@ func (s *HiveStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID, q
 		strings.Join(wheres, " AND "), n,
 	)
 	return s.scanRowsWithScore(ctx, q, args...)
+}
+
+// This is fun, SearchHybrid blends cosine similarity and BM25 full-text scores.
+// alpha=1.0 is pure vector, alpha=0.0 is pure full-text. Requires a valid
+// embedding when alpha > 0; callers should fall back to SearchFullText otherwise.
+func (s *HiveStore) SearchHybrid(ctx context.Context, hiveshareID uuid.UUID, embedding []float32, query, sourceType string, alpha float64, limit int) ([]*models.Hive, error) {
+	if limit == 0 {
+		limit = 10
+	}
+	if alpha < 0 {
+		alpha = 0
+	}
+	if alpha > 1 {
+		alpha = 1
+	}
+
+	sourceFilter := ""
+	args := []interface{}{hiveshareID, pgvector.NewVector(embedding), query, alpha}
+	n := 5
+	if sourceType != "" {
+		sourceFilter = fmt.Sprintf("AND me.source_type = $%d", n)
+		args = append(args, sourceType)
+		n++
+	}
+	args = append(args, limit)
+
+	q := fmt.Sprintf(`
+		WITH vec AS (
+			SELECT id, 1 - (embedding <=> $2) AS vscore
+			FROM hives
+			WHERE hiveshare_id = $1 AND embedding IS NOT NULL
+		),
+		fts AS (
+			SELECT id,
+				   ts_rank(to_tsvector('english', content), plainto_tsquery('english', $3)) AS fscore
+			FROM hives
+			WHERE hiveshare_id = $1
+			  AND to_tsvector('english', content) @@ plainto_tsquery('english', $3)
+		)
+		SELECT me.id, me.hiveshare_id, me.user_id, u.name,
+			   me.source_type, me.source_ref, me.source_url,
+			   me.tool, me.content, me.summary, me.tags, me.metadata,
+			   me.views, me.reuses, me.created_at, me.updated_at,
+			   COALESCE(v.vscore, 0) * $4 + COALESCE(f.fscore, 0) * (1 - $4) AS score
+		FROM hives me
+		JOIN users u ON u.id = me.user_id
+		LEFT JOIN vec v ON v.id = me.id
+		LEFT JOIN fts f ON f.id = me.id
+		WHERE me.hiveshare_id = $1
+		  AND (v.id IS NOT NULL OR f.id IS NOT NULL)
+		  %s
+		ORDER BY score DESC
+		LIMIT $%d`, sourceFilter, n)
+
+	return s.scanRowsWithScore(ctx, q, args...)
+}
+
+// FindSimilar returns the most similar hive to the given embedding within a
+// hiveshare, optionally filtered to a specific source_ref. Returns nil when
+// no result exceeds the similarity threshold.
+func (s *HiveStore) FindSimilar(ctx context.Context, hiveshareID uuid.UUID, sourceRef string, embedding []float32, threshold float64) (*models.Hive, error) {
+	rows, err := s.scanRowsWithScore(ctx,
+		`SELECT me.id, me.hiveshare_id, me.user_id, u.name,
+		        me.source_type, me.source_ref, me.source_url,
+		        me.tool, me.content, me.summary, me.tags, me.metadata,
+		        me.views, me.reuses, me.created_at, me.updated_at,
+		        1 - (me.embedding <=> $3) AS score
+		 FROM hives me
+		 JOIN users u ON u.id = me.user_id
+		 WHERE me.hiveshare_id = $1
+		   AND me.source_ref = $2
+		   AND me.embedding IS NOT NULL
+		   AND 1 - (me.embedding <=> $3) >= $4
+		 ORDER BY score DESC
+		 LIMIT 1`,
+		hiveshareID, sourceRef, pgvector.NewVector(embedding), threshold,
+	)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return rows[0], nil
 }
 
 func (s *HiveStore) IncrementReuse(ctx context.Context, id uuid.UUID) error {

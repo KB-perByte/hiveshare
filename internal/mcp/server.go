@@ -184,6 +184,54 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]inte
 	case "get_metrics":
 		return s.client.GetMetrics(ctx, hsID)
 
+	case "list_hives":
+		sourceType := stringArg(args, "source_type")
+		limit := intArg(args, "limit", 20)
+		offset := intArg(args, "offset", 0)
+		return s.client.ListHives(ctx, hsID, sourceType, limit, offset)
+
+	case "update_hive":
+		entryID := stringArg(args, "entry_id")
+		if entryID == "" {
+			return nil, Errorf(-32602, "entry_id is required")
+		}
+		content := stringArg(args, "content")
+		if content == "" {
+			return nil, Errorf(-32602, "content is required")
+		}
+		payload := map[string]interface{}{
+			"content": content,
+			"summary": stringArg(args, "summary"),
+			"tags":    sliceArg(args, "tags"),
+		}
+		return s.client.UpdateHive(ctx, hsID, entryID, payload)
+
+	case "delete_hive":
+		entryID := stringArg(args, "entry_id")
+		if entryID == "" {
+			return nil, Errorf(-32602, "entry_id is required")
+		}
+		if err := s.client.DeleteHive(ctx, hsID, entryID); err != nil {
+			return nil, err
+		}
+		return map[string]string{"status": "deleted", "entry_id": entryID}, nil
+
+	case "batch_add":
+		rawEntries, ok := args["entries"].([]interface{})
+		if !ok || len(rawEntries) == 0 {
+			return nil, Errorf(-32602, "entries must be a non-empty array")
+		}
+		var entries []map[string]interface{}
+		for _, raw := range rawEntries {
+			if m, ok := raw.(map[string]interface{}); ok {
+				if m["tool"] == nil {
+					m["tool"] = "claude"
+				}
+				entries = append(entries, m)
+			}
+		}
+		return s.client.BatchAdd(ctx, hsID, entries)
+
 	default:
 		return nil, Errorf(-32601, "unknown tool: %s", name)
 	}
@@ -264,6 +312,58 @@ func tools() []Tool {
 				Properties: map[string]Property{
 					"hiveshare_id": {Type: "string", Description: "Hiveshare UUID (uses default if omitted)"},
 				},
+			},
+		},
+		{
+			Name:        "list_hives",
+			Description: "List hives in a hiveshare with optional filtering by source type. Use before searching to browse what's available.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"hiveshare_id": {Type: "string", Description: "Hiveshare UUID (uses default if omitted)"},
+					"source_type":  {Type: "string", Description: "Filter by type: jira, github_issue, github_pr, file, url, manual"},
+					"limit":        {Type: "integer", Description: "Max results (default 20)"},
+					"offset":       {Type: "integer", Description: "Pagination offset (default 0)"},
+				},
+			},
+		},
+		{
+			Name:        "update_hive",
+			Description: "Update an existing hive's content, summary, or tags. Use to refine or correct a hive you previously added.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"entry_id":     {Type: "string", Description: "UUID of the hive to update"},
+					"content":      {Type: "string", Description: "New full content (required)"},
+					"summary":      {Type: "string", Description: "Updated one-line summary"},
+					"tags":         {Type: "string", Description: "Comma-separated tags"},
+					"hiveshare_id": {Type: "string", Description: "Hiveshare UUID (uses default if omitted)"},
+				},
+				Required: []string{"entry_id", "content"},
+			},
+		},
+		{
+			Name:        "delete_hive",
+			Description: "Delete a hive entry. Use to remove stale or incorrect entries.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"entry_id":     {Type: "string", Description: "UUID of the hive to delete"},
+					"hiveshare_id": {Type: "string", Description: "Hiveshare UUID (uses default if omitted)"},
+				},
+				Required: []string{"entry_id"},
+			},
+		},
+		{
+			Name:        "batch_add",
+			Description: "Add multiple hives in one call. More efficient than calling add_hive repeatedly when you have several artifacts to store.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"entries":      {Type: "array", Description: "Array of hive objects, each with content, source_type, source_ref (and optionally summary, tags, source_url)"},
+					"hiveshare_id": {Type: "string", Description: "Hiveshare UUID (uses default if omitted)"},
+				},
+				Required: []string{"entries"},
 			},
 		},
 	}

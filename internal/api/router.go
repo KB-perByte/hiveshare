@@ -7,15 +7,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KB-perByte/hiveshare/internal/embed"
+	"github.com/KB-perByte/hiveshare/internal/realtime"
+	"github.com/KB-perByte/hiveshare/internal/store"
+	"github.com/KB-perByte/hiveshare/internal/version"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/httprate"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
-	"github.com/KB-perByte/hiveshare/internal/embed"
-	"github.com/KB-perByte/hiveshare/internal/realtime"
-	"github.com/KB-perByte/hiveshare/internal/store"
-	"github.com/KB-perByte/hiveshare/internal/version"
 )
 
 // userStoreKey is used to pass the user store through context for invite acceptance.
@@ -24,6 +24,7 @@ type userStoreKey struct{}
 // NewRouter constructs and returns the fully wired chi router for the hiveshare
 // HTTP API. It mounts all route groups, applies rate-limiting and auth middleware,
 // and wires together the provided stores, embedder, hub, and worker.
+// I don't like it I'll sit and think about it someday.
 func NewRouter(
 	userStore *store.UserStore,
 	hsStore *store.HiveshareStore,
@@ -43,12 +44,19 @@ func NewRouter(
 	r.Use(requestLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestSize(1 << 20)) // 1MB body cap
-	r.Use(httprate.Limit(60, time.Minute,
-		httprate.WithKeyFuncs(apiKeyOrIP),
-		httprate.WithLimitHandler(func(w http.ResponseWriter, r *http.Request) {
-			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
-		}),
-	))
+
+	limitErr := func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+	}
+	// Global safety net — catches anything not covered by a tighter per-route limit.
+	globalLimit := httprate.Limit(200, time.Minute, httprate.WithKeyFuncs(apiKeyOrIP), httprate.WithLimitHandler(limitErr))
+	// Unauthenticated endpoints: keyed by IP to prevent account enumeration.
+	publicLimit := httprate.Limit(10, time.Minute, httprate.WithKeyFuncs(httprate.KeyByRealIP), httprate.WithLimitHandler(limitErr))
+	// Hive writes are expensive (embed enqueue, trigger, SSE fan-out).
+	writeLimit := httprate.Limit(20, time.Minute, httprate.WithKeyFuncs(apiKeyOrIP), httprate.WithLimitHandler(limitErr))
+	// Search runs an embed + DB query; keep it affordable.
+	searchLimit := httprate.Limit(30, time.Minute, httprate.WithKeyFuncs(apiKeyOrIP), httprate.WithLimitHandler(limitErr))
+	r.Use(globalLimit)
 
 	// inject user store for invite acceptance
 	r.Use(func(next http.Handler) http.Handler {
@@ -68,9 +76,9 @@ func NewRouter(
 	r.Get("/docs", serveDocs)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// public
-		r.With(middleware.Timeout(30*time.Second)).Post("/auth/register", auth.Register)
-		r.With(middleware.Timeout(30*time.Second)).Post("/invitations/{token}/accept", hs.AcceptInvite)
+		// public — tighter IP-keyed limit to prevent account enumeration/invite abuse
+		r.With(middleware.Timeout(30*time.Second), publicLimit).Post("/auth/register", auth.Register)
+		r.With(middleware.Timeout(30*time.Second), publicLimit).Post("/invitations/{token}/accept", hs.AcceptInvite)
 
 		// authenticated
 		r.Group(func(r chi.Router) {
@@ -92,21 +100,21 @@ func NewRouter(
 				r.Delete("/hiveshares/{id}/members/{userId}", hs.RemoveMember)
 
 				r.Get("/hiveshares/{id}/hives", hive.List)
-				r.Post("/hiveshares/{id}/hives", hive.Create)
+				r.With(writeLimit).Post("/hiveshares/{id}/hives", hive.Create)
 				r.Get("/hiveshares/{id}/hives/{entryId}", hive.Get)
-				r.Put("/hiveshares/{id}/hives/{entryId}", hive.Update)
-				r.Delete("/hiveshares/{id}/hives/{entryId}", hive.Delete)
-				r.Post("/hiveshares/{id}/hives/search", hive.Search)
+				r.With(writeLimit).Put("/hiveshares/{id}/hives/{entryId}", hive.Update)
+				r.With(writeLimit).Delete("/hiveshares/{id}/hives/{entryId}", hive.Delete)
+				r.With(searchLimit).Post("/hiveshares/{id}/hives/search", hive.Search)
 				r.Get("/hiveshares/{id}/hives/{entryId}/history", hive.ListHistory)
-				r.Post("/hiveshares/{id}/hives/{entryId}/rollback", hive.Rollback)
-				r.Post("/hiveshares/{id}/hives/undelete", hive.Undelete)
-				r.Post("/hiveshares/{id}/hives/copy", hive.CopyEntries)
+				r.With(writeLimit).Post("/hiveshares/{id}/hives/{entryId}/rollback", hive.Rollback)
+				r.With(writeLimit).Post("/hiveshares/{id}/hives/undelete", hive.Undelete)
+				r.With(writeLimit).Post("/hiveshares/{id}/hives/copy", hive.CopyEntries)
 
-				r.Post("/hiveshares/{id}/snapshots", hive.CreateSnapshot)
+				r.With(writeLimit).Post("/hiveshares/{id}/snapshots", hive.CreateSnapshot)
 				r.Get("/hiveshares/{id}/snapshots", hive.ListSnapshots)
 				r.Get("/hiveshares/{id}/snapshots/{snapshotId}", hive.GetSnapshot)
-				r.Post("/hiveshares/{id}/snapshots/{snapshotId}/restore", hive.RestoreSnapshot)
-				r.Delete("/hiveshares/{id}/snapshots/{snapshotId}", hive.DeleteSnapshot)
+				r.With(writeLimit).Post("/hiveshares/{id}/snapshots/{snapshotId}/restore", hive.RestoreSnapshot)
+				r.With(writeLimit).Delete("/hiveshares/{id}/snapshots/{snapshotId}", hive.DeleteSnapshot)
 
 				r.Get("/hiveshares/{id}/metrics", hs.Metrics)
 				r.Get("/metrics/me", met.UserMetrics)

@@ -79,6 +79,7 @@ SC=$(echo "$SEARCH" | jq '.count')
 smoke_check "$(echo "$SEARCH" | jq 'has("results")')" "true" "search has results key"
 smoke_check "$(echo "$SEARCH" | jq 'has("count")')" "true" "search has count key"
 smoke_check "$(echo "$SEARCH" | jq 'has("query")')" "true" "search has query key"
+smoke_check "$(echo "$SEARCH" | jq 'has("type")')" "true" "search has type key"
 
 SEARCH_400=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives/search" \
     -H "$AUTH_A" -H "Content-Type: application/json" -d '{"limit":5}')
@@ -90,6 +91,11 @@ UPD_CODE=$(curl -s -o $SMOKE_TMPDIR/mem_upd.json -w "%{http_code}" -X PUT "$SMOK
     -d '{"content":"Updated","summary":"upd","tags":["updated"]}')
 smoke_check "$UPD_CODE" "200" "update returns 200"
 smoke_check "$(cat $SMOKE_TMPDIR/mem_upd.json | jq -r '.content')" "Updated" "update changes content"
+
+EMPTY_CONTENT=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$SMOKE_BASE/hiveshares/$HS_ID/hives/$ENTRY_ID" \
+    -H "$AUTH_A" -H "Content-Type: application/json" \
+    -d '{"summary":"only summary, no content"}')
+smoke_check "$EMPTY_CONTENT" "400" "update without content returns 400"
 
 smoke_section "Delete"
 DEL_ENTRY=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives" \

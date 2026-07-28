@@ -198,17 +198,24 @@ CODE=$(curl -s -o "$TMPDIR/mem_upd.json" -w "%{http_code}" -X PUT \
 check_code "$CODE" "200" "PUT /hiveshares/{id}/hives/{entryId}"
 [ "$(jq -r '.content' "$TMPDIR/mem_upd.json")" = "Updated analysis..." ] && ok "content updated" || fail "content not updated"
 
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+  "$API/hiveshares/$HS_ID/hives/$ENTRY_ID" \
+  -H "$AUTH_A" -H "Content-Type: application/json" \
+  -d '{"summary":"missing content"}')
+check_code "$CODE" "400" "PUT without content returns 400"
+
 # ── Memory: Search ────────────────────────────────────────────────────────────
 section "Memory: Search"
 
 CODE=$(curl -s -o "$TMPDIR/search.json" -w "%{http_code}" -X POST \
   "$API/hiveshares/$HS_ID/hives/search" \
   -H "$AUTH_A" -H "Content-Type: application/json" \
-  -d '{"query":"auth refactor","limit":5}')
+  -d '{"query":"auth refactor","limit":5,"alpha":0.7}')
 check_code "$CODE" "200" "POST /hiveshares/{id}/hives/search"
 jq -e '.results' "$TMPDIR/search.json" > /dev/null && ok "has results" || fail "missing results"
 jq -e '.count' "$TMPDIR/search.json" > /dev/null && ok "has count" || fail "missing count"
 jq -e '.query' "$TMPDIR/search.json" > /dev/null && ok "has query" || fail "missing query"
+jq -e '.type' "$TMPDIR/search.json" > /dev/null && ok "has type" || fail "missing type"
 
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
   "$API/hiveshares/$HS_ID/hives/search" \

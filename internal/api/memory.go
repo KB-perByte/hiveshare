@@ -136,7 +136,31 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Metadata:    req.Metadata,
 	}
 
-	// Store immediately with embedding = NULL; embed async so HTTP isn't blocked.
+	// Semantic dedup: if we can embed the new content synchronously, check
+	// whether a near-identical hive for the same source_ref already exists.
+	// Threshold comes from ?dedup_threshold= (default 0.95; 0 = disabled).
+	var cachedEmbedding []float32
+	dedupThreshold := 0.95
+	if t := r.URL.Query().Get("dedup_threshold"); t != "" {
+		if v, parseErr := strconv.ParseFloat(t, 64); parseErr == nil {
+			dedupThreshold = v
+		}
+	}
+	if dedupThreshold > 0 {
+		if emb, embErr := h.embedder.Embed(r.Context(), req.Content); embErr == nil && len(emb) > 0 {
+			cachedEmbedding = emb
+			if existing, findErr := h.mem.FindSimilar(r.Context(), hsID, req.SourceRef, emb, dedupThreshold); findErr == nil && existing != nil {
+				writeJSON(w, http.StatusConflict, map[string]interface{}{
+					"error":      "similar hive already exists",
+					"existing":   existing,
+					"similarity": existing.Score,
+				})
+				return
+			}
+		}
+	}
+
+	// Store immediately; pass cached embedding if available to skip async embed.
 	// Auto-suffix source_ref (e.g. PROJ-123-2) if not unique within this hiveshare.
 	baseRef := entry.SourceRef
 	var created *models.Hive
@@ -145,7 +169,7 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if n > 0 {
 			entry.SourceRef = fmt.Sprintf("%s-%d", baseRef, n+1)
 		}
-		created, err = h.mem.Create(r.Context(), entry, nil)
+		created, err = h.mem.Create(r.Context(), entry, cachedEmbedding)
 		if err == nil {
 			break
 		}
@@ -156,7 +180,9 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	created.UserName = u.Name
 
-	h.worker.Enqueue(embed.Job{EntryID: created.ID, Content: req.Content})
+	if len(cachedEmbedding) == 0 {
+		h.worker.Enqueue(embed.Job{EntryID: created.ID, Content: req.Content})
+	}
 
 	_ = h.metrics.RecordEvent(r.Context(), &models.UsageEvent{
 		UserID:      u.ID,
@@ -294,9 +320,10 @@ func (h *HiveHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Query      string `json:"query"`
-		SourceType string `json:"source_type"`
-		Limit      int    `json:"limit"`
+		Query      string  `json:"query"`
+		SourceType string  `json:"source_type"`
+		Limit      int     `json:"limit"`
+		Alpha      float64 `json:"alpha"` // 0=full-text only, 1=vector only, default 0.7
 	}
 	if err := decodeJSON(r, &req); err != nil || req.Query == "" {
 		writeError(w, http.StatusBadRequest, "query is required")
@@ -305,13 +332,17 @@ func (h *HiveHandler) Search(w http.ResponseWriter, r *http.Request) {
 	if req.Limit == 0 {
 		req.Limit = 10
 	}
+	if req.Alpha == 0 {
+		req.Alpha = 0.7
+	}
 
 	var entries []*models.Hive
 	var err error
+	searchType := "fulltext"
 
-	// try vector search first
 	if emb, embErr := h.embedder.Embed(r.Context(), req.Query); embErr == nil && len(emb) > 0 {
-		entries, err = h.mem.SearchVector(r.Context(), hsID, emb, req.SourceType, req.Limit)
+		searchType = "hybrid"
+		entries, err = h.mem.SearchHybrid(r.Context(), hsID, emb, req.Query, req.SourceType, req.Alpha, req.Limit)
 	} else {
 		entries, err = h.mem.SearchFullText(r.Context(), hsID, req.Query, req.SourceType, req.Limit)
 	}
@@ -327,13 +358,14 @@ func (h *HiveHandler) Search(w http.ResponseWriter, r *http.Request) {
 		UserID:      u.ID,
 		HiveshareID: &hsID,
 		EventType:   "search",
-		Metadata:    map[string]interface{}{"query": req.Query},
+		Metadata:    map[string]interface{}{"query": req.Query, "type": searchType},
 	})
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"results": entries,
 		"count":   len(entries),
 		"query":   req.Query,
+		"type":    searchType,
 	})
 }
 

@@ -42,3 +42,4 @@ release/
 
 # Fly.io (if ever used)
 fly.toml
+plan.md

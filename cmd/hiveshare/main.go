@@ -15,6 +15,10 @@ import (
 	"github.com/KB-perByte/hiveshare/internal/version"
 )
 
+// jsonOut is set by the --json flag and makes commands print raw JSON instead
+// of formatted tables. Checked by individual commands that support it.
+var jsonOut bool
+
 func main() {
 	if err := rootCmd().Execute(); err != nil {
 		os.Exit(1)
@@ -27,6 +31,7 @@ func rootCmd() *cobra.Command {
 		Short:   "HiveShare — collaborative AI memory CLI",
 		Version: version.Commit + " (" + version.BuildTime + ")",
 	}
+	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "Output raw JSON instead of formatted tables")
 	root.AddCommand(
 		authCmd(),
 		createCmd(),
@@ -38,8 +43,32 @@ func rootCmd() *cobra.Command {
 		membersCmd(),
 		streamCmd(),
 		metricsCmd(),
+		completionCmd(root),
 	)
 	return root
+}
+
+func completionCmd(root *cobra.Command) *cobra.Command {
+	return &cobra.Command{
+		Use:       "completion [bash|zsh|fish|powershell]",
+		Short:     "Generate shell completion script",
+		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
+		Args:      cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch args[0] {
+			case "bash":
+				return root.GenBashCompletion(os.Stdout)
+			case "zsh":
+				return root.GenZshCompletion(os.Stdout)
+			case "fish":
+				return root.GenFishCompletion(os.Stdout, true)
+			case "powershell":
+				return root.GenPowerShellCompletionWithDesc(os.Stdout)
+			default:
+				return fmt.Errorf("unsupported shell: %s", args[0])
+			}
+		},
+	}
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -457,6 +486,54 @@ func hiveCmd() *cobra.Command {
 	add.Flags().String("content", "", "Content (or pipe via stdin)")
 	add.MarkFlagRequired("source-ref")
 
+	get := &cobra.Command{
+		Use:   "get <entryId>",
+		Short: "Get a single hive by ID",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			cfg := loadConfig()
+			hsID, _ := cmd.Flags().GetString("hiveshare")
+			if hsID == "" {
+				hsID = cfg.DefaultHiveshare
+			}
+			if hsID == "" {
+				return fmt.Errorf("no hiveshare set")
+			}
+			path := fmt.Sprintf("/api/v1/hiveshares/%s/hives/%s", hsID, args[0])
+			if jsonOut {
+				raw, err := c.getRaw(path)
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(raw))
+				return nil
+			}
+			var entry map[string]interface{}
+			if err := c.get(path, &entry); err != nil {
+				return err
+			}
+			fmt.Printf("ID:       %s\n", entry["id"])
+			fmt.Printf("Source:   %s / %s\n", entry["source_type"], entry["source_ref"])
+			if u, ok := entry["source_url"].(string); ok && u != "" {
+				fmt.Printf("URL:      %s\n", u)
+			}
+			fmt.Printf("Tool:     %s\n", entry["tool"])
+			fmt.Printf("By:       %s\n", entry["user_name"])
+			if s, ok := entry["summary"].(string); ok && s != "" {
+				fmt.Printf("Summary:  %s\n", s)
+			}
+			fmt.Printf("Views:    %.0f | Reuses: %.0f\n", entry["views"], entry["reuses"])
+			fmt.Printf("Created:  %s\n\n", entry["created_at"])
+			fmt.Printf("%s\n", entry["content"])
+			return nil
+		},
+	}
+	get.Flags().String("hiveshare", "", "Hiveshare ID")
+
 	search := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search hives",
@@ -476,18 +553,30 @@ func hiveCmd() *cobra.Command {
 			}
 			limit, _ := cmd.Flags().GetInt("limit")
 			sourceType, _ := cmd.Flags().GetString("source-type")
+			alpha, _ := cmd.Flags().GetFloat64("alpha")
 
-			var result map[string]interface{}
-			if err := c.post("/api/v1/hiveshares/"+hsID+"/hives/search", map[string]interface{}{
+			body := map[string]interface{}{
 				"query":       strings.Join(args, " "),
 				"source_type": sourceType,
 				"limit":       limit,
-			}, &result); err != nil {
+				"alpha":       alpha,
+			}
+			if jsonOut {
+				raw, err := c.postRaw("/api/v1/hiveshares/"+hsID+"/hives/search", body)
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(raw))
+				return nil
+			}
+			var result map[string]interface{}
+			if err := c.post("/api/v1/hiveshares/"+hsID+"/hives/search", body, &result); err != nil {
 				return err
 			}
 
+			searchType, _ := result["type"].(string)
 			entries, _ := result["results"].([]interface{})
-			fmt.Printf("Found %d results for '%s'\n\n", len(entries), result["query"])
+			fmt.Printf("Found %d results for '%s' [%s]\n\n", len(entries), result["query"], searchType)
 			for i, e := range entries {
 				entry, _ := e.(map[string]interface{})
 				fmt.Printf("[%d] %s / %s  (by %s, via %s)\n",
@@ -505,6 +594,7 @@ func hiveCmd() *cobra.Command {
 	search.Flags().String("hiveshare", "", "Hiveshare ID")
 	search.Flags().IntP("limit", "l", 10, "Max results")
 	search.Flags().StringP("source-type", "t", "", "Filter by source type")
+	search.Flags().Float64("alpha", 0.7, "Blend ratio: 1.0=pure vector, 0.0=pure full-text")
 
 	list := &cobra.Command{
 		Use:   "list",
@@ -528,6 +618,15 @@ func hiveCmd() *cobra.Command {
 			path := fmt.Sprintf("/api/v1/hiveshares/%s/hives?limit=%d", hsID, limit)
 			if sourceType != "" {
 				path += "&source_type=" + sourceType
+			}
+
+			if jsonOut {
+				raw, err := c.getRaw(path)
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(raw))
+				return nil
 			}
 
 			var entries []map[string]interface{}
@@ -694,7 +793,7 @@ func hiveCmd() *cobra.Command {
 	copyCmd.Flags().String("to", "", "Target hiveshare ID")
 	copyCmd.Flags().String("entries", "", "Comma-separated entry IDs to copy")
 
-	cmd.AddCommand(add, search, list, history, rollback, undelete, copyCmd)
+	cmd.AddCommand(add, get, search, list, history, rollback, undelete, copyCmd)
 	return cmd
 }
 

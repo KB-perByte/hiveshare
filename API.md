@@ -59,7 +59,14 @@ Base URL: `http://localhost:8080` (configurable via `BASE_URL` env var)
 Authorization: Bearer hvs_<token>
 ```
 
-**Rate limiting:** 60 requests per minute per API key (or per IP if unauthenticated). Returns `429` when exceeded.
+**Rate limiting:** Per-endpoint limits, keyed by API key (or IP for unauthenticated requests). Returns `429` when exceeded.
+
+| Endpoint group | Limit |
+|---|---|
+| `POST /auth/register`, invitation accept | 10 req/min by IP |
+| Hive writes (create, update, delete, rollback, copy, snapshot ops) | 20 req/min by key |
+| `POST /hives/search` | 30 req/min by key |
+| All other authenticated endpoints | 200 req/min by key (global safety net) |
 
 **Body size limit:** 1 MB max request body.
 
@@ -507,7 +514,13 @@ curl -X DELETE http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/members/USER
 | `tags` | No | Array of strings |
 | `metadata` | No | Arbitrary JSON object |
 
-Embedding is generated asynchronously after creation.
+Embedding is generated asynchronously after creation. If the embedding provider is available, the content is embedded synchronously first to check for duplicates; if a near-identical hive already exists for the same `source_ref`, `409 Conflict` is returned instead.
+
+**Query parameters:**
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `dedup_threshold` | `0.95` | Cosine similarity threshold for duplicate detection (0 disables) |
 
 **Response:** `201 Created`
 ```json
@@ -534,6 +547,7 @@ Embedding is generated asynchronously after creation.
 **Error responses:**
 - `400` — content, source_type, or source_ref missing
 - `403` — view-only access
+- `409` — a hive with the same `source_ref` and similarity ≥ `dedup_threshold` already exists; body includes `{"error":"similar hive already exists","existing":{...},"similarity":0.97}`
 
 **Example:**
 ```bash
@@ -691,14 +705,15 @@ curl -X DELETE http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/ENTRY_
 **Auth:** Required
 **Access:** CanView
 
-Searches by semantic similarity (vector search) if embeddings are enabled, falls back to PostgreSQL full-text search otherwise.
+Uses **hybrid search** when embeddings are enabled: blends cosine similarity and BM25 full-text scores weighted by `alpha`. Falls back to PostgreSQL full-text when no embedder is configured or embedding fails.
 
 **Request body:**
 ```json
 {
   "query": "auth refactor approach",
   "source_type": "jira",
-  "limit": 10
+  "limit": 10,
+  "alpha": 0.7
 }
 ```
 
@@ -706,7 +721,8 @@ Searches by semantic similarity (vector search) if embeddings are enabled, falls
 |-------|----------|---------|-------------|
 | `query` | Yes | | Search query text |
 | `source_type` | No | | Filter results by source type |
-| `limit` | No | 10 | Max results |
+| `limit` | No | `10` | Max results |
+| `alpha` | No | `0.7` | Blend ratio: `1.0` = pure vector, `0.0` = pure full-text |
 
 **Response:** `200 OK`
 ```json
@@ -729,9 +745,12 @@ Searches by semantic similarity (vector search) if embeddings are enabled, falls
     }
   ],
   "count": 1,
-  "query": "auth refactor approach"
+  "query": "auth refactor approach",
+  "type": "hybrid"
 }
 ```
+
+The `type` field is `"hybrid"` when vector + full-text blending was used, or `"fulltext"` when falling back.
 
 **Error responses:**
 - `400` — query missing
@@ -741,7 +760,7 @@ Searches by semantic similarity (vector search) if embeddings are enabled, falls
 curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/search \
   -H "Authorization: Bearer hvs_YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"query":"auth refactor","limit":5}'
+  -d '{"query":"auth refactor","limit":5,"alpha":0.7}'
 ```
 
 ---

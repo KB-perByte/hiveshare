@@ -111,3 +111,45 @@ func (c *APIClient) GetMetrics(ctx context.Context, hiveshareID string) (interfa
 	err := c.do(ctx, http.MethodGet, path, nil, &result)
 	return result, err
 }
+
+// ListHives returns hives in a hiveshare with optional source_type filter.
+func (c *APIClient) ListHives(ctx context.Context, hiveshareID, sourceType string, limit, offset int) (interface{}, error) {
+	if limit == 0 {
+		limit = 20
+	}
+	path := fmt.Sprintf("/api/v1/hiveshares/%s/hives?limit=%d&offset=%d", hiveshareID, limit, offset)
+	if sourceType != "" {
+		path += "&source_type=" + sourceType
+	}
+	var result interface{}
+	err := c.do(ctx, http.MethodGet, path, nil, &result)
+	return result, err
+}
+
+// UpdateHive replaces the content, summary, and tags of an existing hive.
+func (c *APIClient) UpdateHive(ctx context.Context, hiveshareID, entryID string, payload map[string]interface{}) (map[string]interface{}, error) {
+	var result map[string]interface{}
+	path := fmt.Sprintf("/api/v1/hiveshares/%s/hives/%s", hiveshareID, entryID)
+	err := c.do(ctx, http.MethodPut, path, payload, &result)
+	return result, err
+}
+
+// DeleteHive removes a hive entry.
+func (c *APIClient) DeleteHive(ctx context.Context, hiveshareID, entryID string) error {
+	path := fmt.Sprintf("/api/v1/hiveshares/%s/hives/%s", hiveshareID, entryID)
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// BatchAdd creates multiple hives sequentially and returns all created entries.
+// Stops on the first error and returns results collected so far.
+func (c *APIClient) BatchAdd(ctx context.Context, hiveshareID string, entries []map[string]interface{}) ([]map[string]interface{}, error) {
+	var results []map[string]interface{}
+	for _, entry := range entries {
+		result, err := c.AddHive(ctx, hiveshareID, entry)
+		if err != nil {
+			return results, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}

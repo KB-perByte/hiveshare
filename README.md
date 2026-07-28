@@ -121,7 +121,7 @@ Add to `~/.claude/claude_desktop_config.json`:
 }
 ```
 
-Restart Claude Code. Claude now has five tools: `search_hives`, `add_hive`, `list_hiveshares`, `get_context`, `get_metrics`.
+Restart Claude Code. Claude now has nine tools: `search_hives`, `add_hive`, `list_hiveshares`, `get_context`, `get_metrics`, `list_hives`, `update_hive`, `delete_hive`, `batch_add`.
 
 ### 6 — Test it
 
@@ -155,12 +155,13 @@ hiveshare auth register --email EMAIL --name NAME [--server URL]
 hiveshare auth status
 
 hiveshare create NAME [--description TEXT]
-hiveshare list
+hiveshare list [--json]
 hiveshare use ID
 
 hiveshare hive add --source-ref REF [--source-type TYPE] [--tool TOOL] [< file]
-hiveshare hive search QUERY [--limit N] [--source-type TYPE]
-hiveshare hive list [--source-type TYPE] [--limit N]
+hiveshare hive get ENTRY_ID [--hiveshare ID] [--json]
+hiveshare hive search QUERY [--limit N] [--source-type TYPE] [--alpha 0.7] [--json]
+hiveshare hive list [--source-type TYPE] [--limit N] [--json]
 hiveshare hive history ENTRY_ID [--limit N]
 hiveshare hive rollback ENTRY_ID --version HISTORY_ID
 hiveshare hive undelete --version HISTORY_ID
@@ -177,7 +178,11 @@ hiveshare members list
 
 hiveshare stream
 hiveshare metrics [--me]
+
+hiveshare completion bash|zsh|fish|powershell
 ```
+
+Global flag: `--json` outputs raw JSON instead of formatted tables (supported by `hive get`, `hive list`, `hive search`).
 
 Source types: `jira`, `github_issue`, `github_pr`, `file`, `url`, `manual`  
 Tools: `claude`, `cursor`, `manual`  
@@ -189,11 +194,15 @@ Roles: `all` (invite + read + write) · `view` (read-only)
 
 | Tool | What it does |
 |---|---|
-| `search_hives` | Semantic or full-text search across the hiveshare |
+| `search_hives` | Hybrid semantic + full-text search; `alpha` controls the blend |
 | `add_hive` | Save crunched context (call after processing any ticket or PR) |
 | `list_hiveshares` | List all spaces you belong to |
 | `get_context` | All hives for a specific source ref (e.g. `PROJ-42`) |
 | `get_metrics` | Collaboration stats for the hiveshare |
+| `list_hives` | Browse hives with optional source_type filter and pagination |
+| `update_hive` | Refine or correct a hive you previously added |
+| `delete_hive` | Remove a stale or incorrect entry |
+| `batch_add` | Add multiple hives in one call instead of calling `add_hive` repeatedly |
 
 ---
 
