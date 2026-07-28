@@ -900,7 +900,7 @@ func inviteCmd() *cobra.Command {
 				hsID = cfg.DefaultHiveshare
 			}
 			if hsID == "" {
-				return fmt.Errorf("no hiveshare set")
+				return fmt.Errorf("no hiveshare set — run 'hiveshare list' to see your hiveshares, then 'hiveshare use <id>' to set a default")
 			}
 			var result map[string]interface{}
 			if err := c.post("/api/v1/hiveshares/"+hsID+"/invite", map[string]string{
@@ -908,14 +908,24 @@ func inviteCmd() *cobra.Command {
 			}, &result); err != nil {
 				return err
 			}
+
+			// Reconstruct the invite URL from the token + the client-configured server URL.
+			// The server-generated invite_url uses BASE_URL which may not be set on the server,
+			// defaulting to localhost — we always know the right URL from the CLI config.
+			token, _ := result["token"].(string)
+			inviteURL := c.BaseURL + "/api/v1/invitations/" + token + "/accept"
+
 			fmt.Printf("Invitation sent to %s\n", args[0])
-			fmt.Printf("Invite link: %s\n", result["invite_url"])
+			fmt.Printf("Invite link: %s\n", inviteURL)
+			fmt.Printf("Token only:  %s\n", token)
 			fmt.Printf("Role: %s | Expires: %s\n", result["role"], result["expires_at"])
+			fmt.Println()
+			fmt.Println("Share the link OR just the token (for MCP-only teammates who use accept_invite).")
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&role, "role", "all", "Role: all (invite/read/write) or view (read-only)")
-	cmd.Flags().StringVar(&hsID, "hiveshare", "", "Hiveshare ID (uses default)")
+	cmd.Flags().StringVar(&hsID, "hiveshare", "", "Hiveshare UUID — run 'hiveshare list' to see IDs, or 'hiveshare use <id>' to set a default")
 	return cmd
 }
 

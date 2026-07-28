@@ -196,18 +196,19 @@ func (s *HiveshareStore) AddMember(ctx context.Context, hiveshareID, userID, inv
 	return err
 }
 
-// CreateInvitation creates a pending invitation.
+// CreateInvitation creates a pending invitation and populates the DB-generated
+// fields (id, status, created_at, expires_at) back onto inv.
 func (s *HiveshareStore) CreateInvitation(ctx context.Context, inv *models.Invitation) error {
 	inv.Role = models.NormalizeRole(inv.Role)
 	if inv.Role != models.RoleAll && inv.Role != models.RoleView {
 		inv.Role = models.RoleAll
 	}
-	_, err := s.db.Exec(ctx,
+	return s.db.QueryRow(ctx,
 		`INSERT INTO invitations (hiveshare_id, email, invited_by, token, role)
-		 VALUES ($1, $2, $3, $4, $5)`,
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id, status, created_at, expires_at`,
 		inv.HiveshareID, inv.Email, inv.InvitedBy, inv.Token, inv.Role,
-	)
-	return err
+	).Scan(&inv.ID, &inv.Status, &inv.CreatedAt, &inv.ExpiresAt)
 }
 
 // GetInvitation returns a pending, non-expired invitation by token.
