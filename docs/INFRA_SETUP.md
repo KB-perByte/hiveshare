@@ -139,7 +139,7 @@ echo "PROJ-42: JWT middleware skips validation on /internal/* routes." | \
 
 Maverick's stream immediately shows:
 ```
-[14:23:01] + memory added: jira/PROJ-42 by Rooster
+[14:23:01] + hive added: jira/PROJ-42 by Rooster
 ```
 
 **Maverick searches Rooster's memory:**
@@ -537,25 +537,69 @@ oc exec deployment/postgres -n hiveshare -- \
 
 ## MCP Setup (any option — both teammates)
 
-### Build and install the MCP binary
+### Interactive install (recommended)
+
+From the hiveshare repo, run the guided installer. It builds both the CLI and MCP binary, registers your account, and wires Claude Code / Cursor automatically:
 
 ```bash
 cd ~/Work/sandbox/hiveshare
-make mcp
-
-# Copy to somewhere on your PATH
-cp bin/hiveshare-mcp ~/.local/bin/
+./scripts/install-client.sh
 ```
 
-### Configure Claude Code
+The script handles everything: binary install to `~/.local/bin/`, credential setup, and patching `~/.claude/claude_desktop_config.json` / `~/.cursor/mcp.json`.
 
-Add to `~/.claude/claude_desktop_config.json` (or project `.mcp.json`):
+To update after pulling new code:
+```bash
+make update-mcp
+```
+
+### Pin to a project repo (do this once per repo)
+
+Run inside the project your team works in:
+
+```bash
+cd /path/to/your-project
+hiveshare use YOUR_HIVESHARE_UUID --project
+git add .claude/settings.json
+git commit -m "chore: pin hiveshare context"
+```
+
+Teammates who pull this commit get the right hiveshare context automatically — no manual UUID configuration.
+
+### MCP-only teammates (no CLI)
+
+If a teammate only uses Claude/Cursor and won't install the CLI, they can onboard entirely through their agent:
+
+1. Add the MCP binary path and server URL to their AI tool config — **no API key yet**:
 
 ```json
 {
   "mcpServers": {
     "hiveshare": {
-      "command": "~/.local/bin/hiveshare-mcp",
+      "command": "/home/username/.local/bin/hiveshare-mcp",
+      "env": {
+        "HIVESHARE_SERVER_URL": "https://YOUR_SERVER_URL"
+      }
+    }
+  }
+}
+```
+
+2. Share the invite token with them (from `hiveshare invite bob@example.com` output).
+
+3. They tell their agent: *"Accept my hiveshare invite, token is `abc123...`, name is Bob"*
+
+4. The agent calls `accept_invite`, gets back an API key and hiveshare ID, and instructs them to add both to their config and restart.
+
+### Manual config (fallback)
+
+If the installer isn't available, add to `~/.claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "hiveshare": {
+      "command": "/home/username/.local/bin/hiveshare-mcp",
       "env": {
         "HIVESHARE_API_KEY": "hvs_your_key",
         "HIVESHARE_SERVER_URL": "https://YOUR_SERVER_URL",
@@ -566,9 +610,9 @@ Add to `~/.claude/claude_desktop_config.json` (or project `.mcp.json`):
 }
 ```
 
-Restart Claude Code or run `/mcp` to reload.
+The `HIVESHARE_DEFAULT_HIVESHARE` here is the global default. If `.claude/settings.json` exists in the repo with its own `HIVESHARE_DEFAULT_HIVESHARE`, that takes precedence automatically.
 
-Verify in Claude: `"List my hiveshares"` — Claude should call `list_hiveshares` and return your space.
+Restart Claude Code. Verify: ask Claude *"List my hiveshares"* — it should call `list_hiveshares` and return your space.
 
 ---
 
@@ -584,7 +628,7 @@ Verify in Claude: `"List my hiveshares"` — Claude should call `list_hiveshares
 [ ] Maverick's `hiveshare stream` terminal shows live update within 2 seconds
 [ ] Maverick searches  →  finds Rooster's entry
 [ ] Both have MCP loaded in Claude Code
-[ ] Claude calls search_memory before re-crunching a known ticket
+[ ] Claude calls search_hives before re-crunching a known ticket
 [ ] `hiveshare metrics` shows entries from both users
 ```
 

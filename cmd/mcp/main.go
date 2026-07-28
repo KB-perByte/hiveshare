@@ -81,7 +81,11 @@ func firstNonEmpty(vals ...string) string {
 func main() {
 	cfg := loadConfig()
 	if cfg.APIKey == "" {
-		log.Fatal("HIVESHARE_API_KEY not set and no config file found at ~/.config/hiveshare/config.json")
+		// Allow startup without a key so accept_invite can run during first-time
+		// onboarding. Every other tool will return an auth error until the key is
+		// configured and the process is restarted.
+		log.Println("hiveshare-mcp: no API key configured — only accept_invite is available. " +
+			"Run accept_invite to get your key, then set HIVESHARE_API_KEY and restart.")
 	}
 
 	client := mcpsrv.NewAPIClient(cfg.ServerURL, cfg.APIKey)

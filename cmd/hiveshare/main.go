@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/KB-perByte/hiveshare/internal/version"
 )
@@ -197,7 +199,8 @@ func listCmd() *cobra.Command {
 }
 
 func useCmd() *cobra.Command {
-	return &cobra.Command{
+	var projectLevel bool
+	cmd := &cobra.Command{
 		Use:   "use <id>",
 		Short: "Set a hiveshare as the default",
 		Args:  cobra.ExactArgs(1),
@@ -210,16 +213,98 @@ func useCmd() *cobra.Command {
 			if err := c.get("/api/v1/hiveshares/"+args[0], &hs); err != nil {
 				return err
 			}
+			name, _ := hs["name"].(string)
+
+			if projectLevel {
+				if _, err := uuid.Parse(args[0]); err != nil {
+					return fmt.Errorf("invalid hiveshare id %q: must be a UUID", args[0])
+				}
+				root, err := findGitRoot()
+				if err != nil {
+					return fmt.Errorf("--project requires a git repository: %w", err)
+				}
+				settingsPath, err := writeProjectMCP(root, args[0])
+				if err != nil {
+					return fmt.Errorf("could not write project settings: %w", err)
+				}
+				fmt.Printf("Project hiveshare : %s (%s)\n", name, args[0])
+				fmt.Printf("Written to        : %s\n", settingsPath)
+				fmt.Printf("Commit this file so teammates get the same hiveshare context automatically.\n")
+				return nil
+			}
+
 			cfg := loadConfig()
 			cfg.DefaultHiveshare = args[0]
-			cfg.DefaultHSName, _ = hs["name"].(string)
+			cfg.DefaultHSName = name
 			if err := saveConfig(cfg); err != nil {
 				return err
 			}
-			fmt.Printf("Active hiveshare: %s (%s)\n", cfg.DefaultHSName, cfg.DefaultHiveshare)
+			fmt.Printf("Active hiveshare: %s (%s)\n", name, args[0])
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&projectLevel, "project", false,
+		"Write HIVESHARE_DEFAULT_HIVESHARE to .claude/settings.json (project-local) instead of global config")
+	return cmd
+}
+
+// findGitRoot walks up from the working directory until it finds a .git entry.
+func findGitRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("not inside a git repository")
+		}
+		dir = parent
+	}
+}
+
+// writeProjectMCP sets HIVESHARE_DEFAULT_HIVESHARE inside .claude/settings.json
+// at the project root, preserving all other existing keys in that file.
+func writeProjectMCP(root, hiveshareID string) (string, error) {
+	settingsPath := filepath.Join(root, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Join(root, ".claude"), 0755); err != nil {
+		return "", err
+	}
+
+	var settings map[string]interface{}
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		json.Unmarshal(data, &settings) //nolint:errcheck — bad JSON gets overwritten below
+	}
+	if settings == nil {
+		settings = map[string]interface{}{}
+	}
+
+	// Navigate .mcpServers.hiveshare.env, creating missing levels, preserving siblings.
+	mcpServers, _ := settings["mcpServers"].(map[string]interface{})
+	if mcpServers == nil {
+		mcpServers = map[string]interface{}{}
+	}
+	hive, _ := mcpServers["hiveshare"].(map[string]interface{})
+	if hive == nil {
+		hive = map[string]interface{}{}
+	}
+	env, _ := hive["env"].(map[string]interface{})
+	if env == nil {
+		env = map[string]interface{}{}
+	}
+	env["HIVESHARE_DEFAULT_HIVESHARE"] = hiveshareID
+	hive["env"] = env
+	mcpServers["hiveshare"] = hive
+	settings["mcpServers"] = mcpServers
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return settingsPath, os.WriteFile(settingsPath, data, 0644)
 }
 
 func snapshotCmd() *cobra.Command {

@@ -1,5 +1,5 @@
 .PHONY: all build server mcp cli deps migrate dev dev-clean clean docker-up docker-down release server-linux \
-       smoke-test smoke-test-full integration-test psql
+       smoke-test smoke-test-full integration-test psql install-mcp update-mcp
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
@@ -14,6 +14,17 @@ CONTAINER_RUNTIME ?= docker
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 all: deps build
+
+# Install CLI + MCP sidecar and wire into Claude Code / Cursor.
+install-mcp:
+	./scripts/install-client.sh
+
+# Quick MCP binary rebuild — no prompts, keeps existing credentials.
+update-mcp: mcp
+	@BINARY="$${HOME}/.local/bin/hiveshare-mcp"; \
+	rm -f "$$BINARY"; \
+	install -m 755 $(BINDIR)/hiveshare-mcp "$$BINARY"; \
+	echo "  Updated $$BINARY"
 
 build: server mcp cli
 
@@ -88,7 +99,7 @@ install: cli
 	@cp $(BINDIR)/hiveshare /usr/local/bin/hiveshare
 	@echo "hiveshare installed to /usr/local/bin/hiveshare"
 
-install-mcp: mcp
+install-mcp-system: mcp
 	@cp $(BINDIR)/hiveshare-mcp /usr/local/bin/hiveshare-mcp
 	@echo "hiveshare-mcp installed to /usr/local/bin/hiveshare-mcp"
 
@@ -145,8 +156,10 @@ help:
 	@echo "  make mcp            Build MCP sidecar"
 	@echo "  make cli            Build hiveshare CLI"
 	@echo "  make migrate        Apply SQL migrations"
-	@echo "  make install        Install hiveshare to /usr/local/bin"
-	@echo "  make install-mcp    Install hiveshare-mcp to /usr/local/bin"
+	@echo "  make install            Install hiveshare CLI to /usr/local/bin (root)"
+	@echo "  make install-mcp        Interactive guided install: CLI + MCP to ~/.local/bin"
+	@echo "  make install-mcp-system Install hiveshare-mcp to /usr/local/bin (root)"
+	@echo "  make update-mcp         Rebuild MCP binary and update ~/.local/bin"
 	@echo "  make docker-up      Start postgres + redis"
 	@echo "  make docker-down    Stop postgres + redis"
 	@echo "  make dev-clean      Stop containers and wipe database volume"

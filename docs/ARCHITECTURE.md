@@ -60,11 +60,11 @@ graph TB
 
 | Component | Implementation | File |
 |---|---|---|
-| HTTP router | chi v5 + httprate (60/min), RequestSize 1MB, Timeout 30s (SSE excluded) | `internal/api/router.go` |
+| HTTP router | chi v5 + httprate (per-endpoint: 10/min public by IP, 20/min writes, 30/min search, 200/min global), RequestSize 1MB, Timeout 30s (SSE excluded) | `internal/api/router.go` |
 | Auth | Bearer API key; **SHA-256 at rest**, cleartext only at register | `internal/api/middleware.go`, `store/users.go` |
 | DB pool | pgxpool MaxConns=20, MinConns=4, lifetimes set; `ivfflat.probes=10` AfterConnect | `internal/store/db.go` |
 | Vector search | pgvector **HNSW** cosine | `migrations/002_indexes.sql`, `003_hardening.sql` |
-| Full-text fallback | `plainto_tsquery` + `ts_rank` | `internal/store/memory.go` (HiveStore) |
+| Search | **Hybrid**: BM25 (`ts_rank`) + cosine similarity blended by `alpha` (default 0.7). Falls back to full-text when no embedder configured. Response includes `"type": "hybrid"\|"fulltext"` | `internal/store/memory.go` (HiveStore) |
 | Embedding | **Async** worker pool; HTTP path stores `embedding = NULL` then UPDATE | `internal/embed/worker.go` |
 | History | Trigger on content/summary/tags/metadata (+ delete); rollback / undelete / copy | `migrations/006_hive_history.sql`, `store/history.go` |
 | Snapshots | Point-in-time hiveshare capture; restore → **new** hiveshare (max 10k entries) | `store/history.go` |
@@ -74,7 +74,8 @@ graph TB
 | History retention | Optional `HISTORY_TTL_DAYS` / `HISTORY_MAX_VERSIONS` (default 0 = forever) | `cmd/server/main.go` |
 | Health | `GET /health` — DB + Redis ping | `internal/api/router.go` |
 | Logging | `slog` JSON | `cmd/server/main.go` |
-| MCP server | stdio JSON-RPC | `internal/mcp/server.go` |
+| MCP server | stdio JSON-RPC; 10 tools; starts without API key (limited to `accept_invite`) for first-time onboarding | `internal/mcp/server.go` |
+| MCP install scope | Binary global (`~/.local/bin`); credentials global (`~/.config/hiveshare/config.json`); default hiveshare **project-local** (`.claude/settings.json` via `hiveshare use --project`) | `cmd/hiveshare/main.go` |
 
 ---
 
@@ -102,6 +103,13 @@ All items below were found in the initial review and are **fixed in tree**.
 | 2.16 | `memory` renamed to `hive`; table `memory_entries` → `hives` | Migration 005; `source_ref` unique per hiveshare, API auto-suffixes duplicates |
 | 2.17 | Delete ignored errors, left Redis view key, no SSE event | Returns 404 on not-found; cleans Redis key; publishes `hive_deleted`; logs usage event |
 | 2.18 | No version history / snapshots | Migration 006: `hives_history` trigger, rollback/undelete/copy, snapshots (restore → new hiveshare) |
+| 2.19 | Auth middleware DB round-trip per request | In-process LRU cache (256 entries, 60s TTL) in `AuthMiddleware` |
+| 2.20 | `HiveStore.Get` returned HTTP 500 for missing hive | Fixed: returns `pgx.ErrNoRows` → 404 |
+| 2.21 | `PUT /hives/{id}` silently zeroed content on partial update | Fixed: content required; validates before store call |
+| 2.22 | Flat 60 req/min rate limit — no distinction by operation cost | Per-endpoint limits: 10/min public (by IP), 20/min writes, 30/min search, 200/min global |
+| 2.23 | Binary vector-or-fulltext search choice | Hybrid CTE: `alpha × cosine + (1-alpha) × BM25`; `alpha` is per-request (default 0.7) |
+| 2.24 | MCP had 5 tools, no onboarding path for new users | 10 tools; `accept_invite` works pre-API-key; server starts without key in limited mode |
+| 2.25 | MCP default hiveshare was global-only | `hiveshare use --project` writes to `.claude/settings.json` — committable, teammates pick it up automatically |
 
 **Ops note:** Existing plaintext API keys will not authenticate after the hash change — users must re-register (or accept a fresh invite). Apply migrations through `006_hive_history.sql` (`make migrate` or `scripts/install-server.sh`).
 
@@ -224,19 +232,19 @@ sequenceDiagram
     participant Embed as Embedding API
     participant PG as PostgreSQL
 
-    Claude->>MCP: search_hives {query: "JWT middleware"}
+    Claude->>MCP: search_hives {query: "JWT middleware", alpha: 0.7}
     MCP->>API: POST /api/v1/hiveshares/:id/hives/search
     API->>Embed: Embed(query)
-    alt embedding available
+    alt embedding provider configured and embed succeeds
         Embed-->>API: vector[1536]
-        API->>PG: SELECT … ORDER BY embedding <=> $2 LIMIT 10
-        note over PG: HNSW cosine scan
-    else embedding failed / no provider / NULL vectors
-        API->>PG: plainto_tsquery full-text search
+        API->>PG: CTE hybrid: alpha×cosine + (1-alpha)×BM25
+        note over PG: HNSW cosine LEFT JOIN plainto_tsquery — single query
+    else no provider / embed failed
+        API->>PG: plainto_tsquery full-text only
     end
-    PG-->>API: ranked results (full content)
-    API->>PG: INSERT usage_events {event='search'}
-    API-->>MCP: {results, count, query}
+    PG-->>API: ranked results (full content + score)
+    API->>PG: INSERT usage_events {event='search', type: hybrid|fulltext}
+    API-->>MCP: {results, count, query, type}
 ```
 
 ### 4.4 SSE connection lifecycle
@@ -416,16 +424,21 @@ The following topics produced zero surviving verified claims — all specific nu
 | F11 | `usage_events` 90-day rolling delete | Done |
 | F11b | Redis-backed views counter | Done |
 | F17a | Structured slog logging | Done |
-| F17b | Rate limit 60/min per key | Done |
+| F17b | Rate limit per-endpoint: 10/min public (IP), 20/min writes, 30/min search, 200/min global | Done |
 | F19 | Hive history, rollback, undelete, copy | Done |
 | F20 | Hiveshare snapshots + restore-to-new | Done |
+| F21 | `HiveStore.Get` 500→404 for missing hive; `Update` content validation | Done |
+| F22 | Hybrid search (BM25 + cosine CTE, `alpha` param) | Done |
+| F23 | MCP expansion: `list_hives`, `update_hive`, `delete_hive`, `batch_add`, `accept_invite` | Done |
+| F24 | `accept_invite` pre-auth onboarding; MCP server starts without API key | Done |
+| F25 | `hiveshare use --project` → project-level `.claude/settings.json` | Done |
+| F10 | Auth LRU cache (256 entries, 60s TTL) | Done |
 
 ### Next (before wider / multi-replica)
 
 | # | Fix | Effort | Impact |
 |---|---|---|---|
 | F2 | Set `maintenance_work_mem` for HNSW builds; confirm `hnsw.ef_search` for large top-k | 15 min | Build speed + recall |
-| F10 | Auth LRU cache (256 entries, 60s TTL) | 2 hrs | Latency |
 | F13 | PgBouncer in front of PostgreSQL | 4 hrs | Connection headroom |
 | F14 | Postgres read replica for metrics | 1 day | Primary offload |
 | F15 | Redis Streams for SSE | 1 day | Multi-replica reliability |

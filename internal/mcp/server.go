@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 )
@@ -127,6 +128,40 @@ func (s *Server) handleToolCall(ctx context.Context, base Response, req *Request
 }
 
 func (s *Server) callTool(ctx context.Context, name string, args map[string]interface{}) (interface{}, error) {
+	// accept_invite is pre-auth: it works before the user has an API key.
+	// Handle it first, before any hiveshare or auth checks.
+	if name == "accept_invite" {
+		token := stringArg(args, "token")
+		if token == "" {
+			return nil, Errorf(-32602, "token is required")
+		}
+		result, err := s.client.AcceptInvite(ctx, token, stringArg(args, "name"))
+		if err != nil {
+			return nil, err
+		}
+		// Surface actionable next steps for the agent to relay to the user.
+		hsID, _ := result["hiveshare_id"].(string)
+		if user, ok := result["user"].(map[string]interface{}); ok {
+			if key, _ := user["api_key"].(string); key != "" {
+				// Brand-new user: needs to save the key and restart.
+				result["setup_instructions"] = fmt.Sprintf(
+					"New account created. "+
+						"1) Set HIVESHARE_API_KEY=%s in your MCP config (hiveshare-mcp env). "+
+						"2) Set HIVESHARE_DEFAULT_HIVESHARE=%s. "+
+						"3) Restart Claude/Cursor. You will then have full access.",
+					key, hsID)
+			} else {
+				// Existing user added to a new hiveshare: needs to switch context.
+				result["setup_instructions"] = fmt.Sprintf(
+					"You have been added to hiveshare %s. "+
+						"Run: hiveshare use %s  (or set HIVESHARE_DEFAULT_HIVESHARE=%s and restart Claude/Cursor). "+
+						"Your existing API key is unchanged.",
+					hsID, hsID, hsID)
+			}
+		}
+		return result, nil
+	}
+
 	hsID := stringArg(args, "hiveshare_id")
 	if hsID == "" {
 		hsID = s.defaultHS
@@ -364,6 +399,18 @@ func tools() []Tool {
 					"hiveshare_id": {Type: "string", Description: "Hiveshare UUID (uses default if omitted)"},
 				},
 				Required: []string{"entries"},
+			},
+		},
+		{
+			Name:        "accept_invite",
+			Description: "Accept a hiveshare invitation using the token from an invite link. Works before you have an API key — use this for first-time onboarding. The response includes your API key (new users only) and setup instructions.",
+			InputSchema: InputSchema{
+				Type: "object",
+				Properties: map[string]Property{
+					"token": {Type: "string", Description: "Invite token from the invitation link or email"},
+					"name":  {Type: "string", Description: "Your display name (used if this is your first registration)"},
+				},
+				Required: []string{"token"},
 			},
 		},
 	}

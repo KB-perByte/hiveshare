@@ -65,9 +65,22 @@ API keys are prefixed `hvs_`, SHA-256 hashed at rest. Cleartext returned only at
 
 ## MCP tools (what Claude sees)
 
-`search_hives`, `add_hive`, `list_hiveshares`, `get_context`, `get_metrics`
+`search_hives`, `add_hive`, `list_hiveshares`, `get_context`, `get_metrics`,
+`list_hives`, `update_hive`, `delete_hive`, `batch_add`
 
 Default hiveshare env: `HIVESHARE_DEFAULT_HIVESHARE` (legacy alias: `HIVESHARE_DEFAULT_HEADSPACE`).
+
+## MCP install scope
+
+The MCP sidecar (`hiveshare-mcp`) has three independent layers of config:
+
+| Layer | Where | How set |
+|---|---|---|
+| Binary | `~/.local/bin/hiveshare-mcp` | `scripts/install-client.sh` |
+| Personal credentials (API key, server URL) | `~/.config/hiveshare/config.json` | `hiveshare auth register` or install script |
+| Per-project hiveshare | `.claude/settings.json` in repo root | `hiveshare use <id> --project` |
+
+Run `scripts/install-client.sh` once per machine. Run `hiveshare use <id> --project` once per project repo and commit the resulting `.claude/settings.json` — teammates get the right hiveshare context automatically when they open the repo.
 
 ## Migrations
 

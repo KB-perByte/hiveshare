@@ -112,6 +112,36 @@ func (c *APIClient) GetMetrics(ctx context.Context, hiveshareID string) (interfa
 	return result, err
 }
 
+// AcceptInvite posts to the public invite acceptance endpoint. No API key is
+// required — this is intentionally unauthenticated so brand-new users can
+// onboard before they have a key.
+func (c *APIClient) AcceptInvite(ctx context.Context, token, name string) (map[string]interface{}, error) {
+	body, _ := json.Marshal(map[string]interface{}{"name": name})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.BaseURL+"/api/v1/invitations/"+token+"/accept",
+		bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("accept invite: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// Deliberately no Authorization header — this endpoint is public.
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("accept invite: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("api %d: %s", resp.StatusCode, raw)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // ListHives returns hives in a hiveshare with optional source_type filter.
 func (c *APIClient) ListHives(ctx context.Context, hiveshareID, sourceType string, limit, offset int) (interface{}, error) {
 	if limit == 0 {

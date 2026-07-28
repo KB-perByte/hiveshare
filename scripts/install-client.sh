@@ -56,9 +56,11 @@ echo
 
 INSTALL_DIR="${HOME}/.local/bin"
 VERSION_FILE="${INSTALL_DIR}/hiveshare.version"
+MCP_VERSION_FILE="${INSTALL_DIR}/hiveshare-mcp.version"
 CONFIG_DIR="${HOME}/.config/hiveshare"
 CONFIG_FILE="${CONFIG_DIR}/config.json"
 BINARY="${INSTALL_DIR}/hiveshare"
+MCP_BINARY="${INSTALL_DIR}/hiveshare-mcp"
 BACKUP_BINARY="${BINARY}.bak"
 BACKUP_CONFIG="${CONFIG_FILE}.bak"
 ROLLBACK_NEEDED=0
@@ -82,6 +84,10 @@ step "Checking prerequisites"
 
 command -v go >/dev/null 2>&1 || die "Go is not installed. See https://go.dev/doc/install"
 ok "Go $(go version | awk '{print $3}')"
+
+HAS_JQ=0
+command -v jq >/dev/null 2>&1 && HAS_JQ=1 && ok "jq available (AI tool config patching enabled)" \
+    || warn "jq not found — will show manual snippets for Claude Code / Cursor wiring"
 
 # ── detect existing installation ──────────────────────────────────────────────
 
@@ -138,8 +144,9 @@ fi
 
 if [[ "$UPGRADING" -eq 1 ]]; then
     step "Backing up existing installation"
-    cp -f "$BINARY" "$BACKUP_BINARY" && ok "Binary backed up"
-    [[ -f "$CONFIG_FILE" ]] && cp -f "$CONFIG_FILE" "$BACKUP_CONFIG" && ok "Config backed up"
+    cp -f "$BINARY" "$BACKUP_BINARY" && ok "CLI binary backed up"
+    [[ -f "$MCP_BINARY"  ]] && cp -f "$MCP_BINARY"  "$MCP_BINARY.bak"  && ok "MCP binary backed up"
+    [[ -f "$CONFIG_FILE" ]] && cp -f "$CONFIG_FILE" "$BACKUP_CONFIG"   && ok "Config backed up"
     ROLLBACK_NEEDED=1
 fi
 
@@ -155,12 +162,26 @@ go build -ldflags="$LDFLAGS" -o "$BUILD_TMP" ./cmd/hiveshare \
 
 mv -f "$BUILD_TMP" "$BINARY"
 chmod +x "$BINARY"
-ok "Binary installed: $BINARY"
+ok "CLI binary installed: $BINARY"
 
 printf 'commit=%s\nbuild_time=%s\ninstalled_at=%s\n' \
     "$NEW_COMMIT" "$NEW_BUILDTIME" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$VERSION_FILE"
 
-"$BINARY" --version >/dev/null 2>&1 && ok "Binary runs: $("$BINARY" --version 2>&1 | head -1)"
+"$BINARY" --version >/dev/null 2>&1 && ok "CLI runs: $("$BINARY" --version 2>&1 | head -1)"
+
+# Build MCP sidecar — non-fatal; CLI is usable without it.
+MCP_BUILD_TMP="$(mktemp)"
+if go build -ldflags="$LDFLAGS" -o "$MCP_BUILD_TMP" ./cmd/mcp 2>/tmp/hiveshare-mcp-build.log; then
+    # Atomic replace: remove old inode first to avoid "text file busy" if sidecar is mid-run.
+    [[ -f "$MCP_BINARY" ]] && rm -f "$MCP_BINARY"
+    install -m 755 "$MCP_BUILD_TMP" "$MCP_BINARY"
+    printf 'commit=%s\nbuild_time=%s\ninstalled_at=%s\n' \
+        "$NEW_COMMIT" "$NEW_BUILDTIME" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MCP_VERSION_FILE"
+    ok "MCP binary installed: $MCP_BINARY"
+else
+    warn "MCP build failed (see /tmp/hiveshare-mcp-build.log) — CLI install continues."
+fi
+rm -f "$MCP_BUILD_TMP"
 
 # ── config setup ──────────────────────────────────────────────────────────────
 
@@ -299,20 +320,92 @@ else
     ROLLBACK_NEEDED=0
 fi
 
+# ── AI tool wiring ────────────────────────────────────────────────────────────
+
+if [[ -f "$MCP_BINARY" ]]; then
+    FINAL_DEFAULT_HS="$(grep -o '"default_hiveshare"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_FILE" \
+        | cut -d'"' -f4 || true)"
+
+    MCP_BLOCK="$(cat <<MCPEOF
+{
+  "command": "${MCP_BINARY}",
+  "env": {
+    "HIVESHARE_API_KEY": "${FINAL_KEY}",
+    "HIVESHARE_SERVER_URL": "${FINAL_URL}",
+    "HIVESHARE_DEFAULT_HIVESHARE": "${FINAL_DEFAULT_HS}"
+  }
+}
+MCPEOF
+)"
+
+    wire_ai_config() {
+        local cfg_file="$1" label="$2"
+        local dir; dir="$(dirname "$cfg_file")"
+        if [[ ! -f "$cfg_file" ]]; then
+            mkdir -p "$dir"
+            echo '{"mcpServers":{}}' > "$cfg_file"
+        fi
+        if [[ "$HAS_JQ" -eq 1 ]]; then
+            local tmp; tmp="$(mktemp)"
+            jq --argjson b "$MCP_BLOCK" '.mcpServers.hiveshare = $b' "$cfg_file" > "$tmp" \
+                && mv "$tmp" "$cfg_file"
+            ok "Wired hiveshare MCP into $label ($cfg_file)"
+        else
+            warn "Add this to $cfg_file under .mcpServers:"
+            echo '    "hiveshare": '"$MCP_BLOCK"
+        fi
+    }
+
+    step "AI tool wiring"
+
+    CLAUDE_CFG="${HOME}/.claude/claude_desktop_config.json"
+    if [[ -d "${HOME}/.claude" ]]; then
+        echo -e "  ${BOLD}Claude Code${NC} detected"
+        if ask_yn "Wire hiveshare MCP into Claude Code?" "y"; then
+            wire_ai_config "$CLAUDE_CFG" "Claude Code"
+            warn "Restart Claude Code — 9 tools will be available: search_hives, add_hive,"
+            warn "  list_hiveshares, get_context, get_metrics, list_hives, update_hive,"
+            warn "  delete_hive, batch_add"
+        fi
+    else
+        warn "Claude Code not detected. To wire manually, add to ~/.claude/claude_desktop_config.json:"
+        echo '  { "mcpServers": { "hiveshare": '"$MCP_BLOCK"' } }'
+    fi
+
+    CURSOR_CFG="${HOME}/.cursor/mcp.json"
+    if [[ -d "${HOME}/.cursor" ]]; then
+        echo -e "  ${BOLD}Cursor${NC} detected"
+        if ask_yn "Wire hiveshare MCP into Cursor?" "y"; then
+            wire_ai_config "$CURSOR_CFG" "Cursor"
+            warn "Restart Cursor for tools to appear."
+        fi
+    fi
+fi
+
 # ── done ──────────────────────────────────────────────────────────────────────
 
 echo
 echo -e "${GREEN}${BOLD}Installation complete.${NC}"
 echo
-echo "  Binary  : $BINARY  (commit: $NEW_COMMIT)"
+echo "  CLI     : $BINARY  (commit: $NEW_COMMIT)"
+[[ -f "$MCP_BINARY" ]] && echo "  MCP     : $MCP_BINARY"
 echo "  Config  : $CONFIG_FILE"
 echo
 echo "  Quick start:"
-echo "    hiveshare list           # list your hiveshares"
-echo "    hiveshare create <name>  # create a new hiveshare"
-echo "    hiveshare use <id>       # set active hiveshare"
-echo "    hiveshare hive add --content '…'   # save a hive"
-echo "    hiveshare hive search '<query>'    # search hives"
-echo "    hiveshare hive history <id>        # version history"
-echo "    hiveshare snapshot list  # list snapshots"
+echo "    hiveshare list                          # list your hiveshares"
+echo "    hiveshare create <name>                 # create a new hiveshare"
+echo "    hiveshare use <id>                      # set active hiveshare"
+echo "    hiveshare hive add --source-ref REF     # save a hive"
+echo "    hiveshare hive get <id>                 # view a hive"
+echo "    hiveshare hive search '<query>'         # search hives"
+echo "    hiveshare hive history <id>             # version history"
+echo "    hiveshare snapshot list                 # list snapshots"
+echo "    hiveshare completion bash > …           # shell completion"
+echo
+echo "  To update later:"
+echo "    git pull && ./scripts/install-client.sh"
+echo
+echo "  Per-project MCP context (run inside each project repo):"
+echo "    hiveshare use <id> --project   # writes to .claude/settings.json"
+echo "    git add .claude/settings.json  # commit so teammates get the same hiveshare"
 echo

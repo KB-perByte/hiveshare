@@ -520,7 +520,7 @@ Embedding is generated asynchronously after creation. If the embedding provider 
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `dedup_threshold` | `0.95` | Cosine similarity threshold for duplicate detection (0 disables) |
+| `dedup_threshold` | `0` (disabled) | Cosine similarity threshold for duplicate detection. When set (e.g. `0.95`), embeds the new content synchronously before inserting — adds 200–500ms latency per create. Opt-in only. |
 
 **Response:** `201 Created`
 ```json

@@ -136,11 +136,11 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Metadata:    req.Metadata,
 	}
 
-	// Semantic dedup: if we can embed the new content synchronously, check
-	// whether a near-identical hive for the same source_ref already exists.
-	// Threshold comes from ?dedup_threshold= (default 0.95; 0 = disabled).
+	// Semantic dedup: opt-in via ?dedup_threshold=0.95 (default 0 = disabled).
+	// Disabled by default because the synchronous embed round-trip adds 200–500ms
+	// latency to every create when an embedding provider is configured.
 	var cachedEmbedding []float32
-	dedupThreshold := 0.95
+	dedupThreshold := 0.0
 	if t := r.URL.Query().Get("dedup_threshold"); t != "" {
 		if v, parseErr := strconv.ParseFloat(t, 64); parseErr == nil {
 			dedupThreshold = v

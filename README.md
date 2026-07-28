@@ -123,7 +123,34 @@ Add to `~/.claude/claude_desktop_config.json`:
 
 Restart Claude Code. Claude now has nine tools: `search_hives`, `add_hive`, `list_hiveshares`, `get_context`, `get_metrics`, `list_hives`, `update_hive`, `delete_hive`, `batch_add`.
 
-### 6 — Test it
+### 6 — Pin a hiveshare to each project
+
+The binary and credentials installed above are global — one install covers all your projects. What changes per-project is *which hiveshare* Claude connects to.
+
+Inside each project repo:
+```bash
+hiveshare use <uuid> --project
+```
+
+This writes `HIVESHARE_DEFAULT_HIVESHARE` into `.claude/settings.json` at the repo root:
+
+```json
+{
+  "mcpServers": {
+    "hiveshare": {
+      "env": {
+        "HIVESHARE_DEFAULT_HIVESHARE": "a3f1c9d2-..."
+      }
+    }
+  }
+}
+```
+
+Commit that file. Every teammate who has `hiveshare-mcp` installed will automatically connect to the right hiveshare when they open this repo — no manual configuration.
+
+Without `--project`, `hiveshare use <uuid>` updates the global default in `~/.config/hiveshare/config.json` instead.
+
+### 7 — Test it
 
 **Maverick's terminal:**
 ```bash
@@ -156,7 +183,8 @@ hiveshare auth status
 
 hiveshare create NAME [--description TEXT]
 hiveshare list [--json]
-hiveshare use ID
+hiveshare use ID                              # set global default
+hiveshare use ID --project                    # write to .claude/settings.json (commit this)
 
 hiveshare hive add --source-ref REF [--source-type TYPE] [--tool TOOL] [< file]
 hiveshare hive get ENTRY_ID [--hiveshare ID] [--json]
@@ -246,7 +274,7 @@ MCP sidecar ──┘                    │  embed workers, health
 - List endpoints omit full `content` (use Get/Search for body text)
 - Ops: `GET /health` checks Postgres + Redis
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams, scale analysis, and the V2/V3 roadmap. See [`API.md`](API.md) for the full HTTP reference. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides.
+See [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) for the full onboarding guide covering all user types (team owner, CLI developer, MCP-only, server setup). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for diagrams, scale analysis, and the V2/V3 roadmap. See [`API.md`](API.md) for the full HTTP reference. See [`docs/INFRA_SETUP.md`](docs/INFRA_SETUP.md) for ngrok, AWS EC2, and OpenShift deployment guides.
 
 ---
 

@@ -24,29 +24,37 @@ echo
 INSTALL_DIR="${HOME}/.local/bin"
 BINARY="${INSTALL_DIR}/hiveshare"
 VERSION_FILE="${INSTALL_DIR}/hiveshare.version"
+MCP_BINARY="${INSTALL_DIR}/hiveshare-mcp"
+MCP_VERSION_FILE="${INSTALL_DIR}/hiveshare-mcp.version"
 CONFIG_FILE="${HOME}/.config/hiveshare/config.json"
 CONFIG_DIR="${HOME}/.config/hiveshare"
 
+HAS_JQ=0
+command -v jq >/dev/null 2>&1 && HAS_JQ=1
+
 # ── check anything is installed ───────────────────────────────────────────────
 
-if [[ ! -f "$BINARY" ]]; then
-    warn "hiveshare not found at $BINARY — nothing to remove."
+if [[ ! -f "$BINARY" && ! -f "$MCP_BINARY" ]]; then
+    warn "Neither hiveshare nor hiveshare-mcp found in $INSTALL_DIR — nothing to remove."
     exit 0
 fi
 
 VERSION="unknown"
 [[ -f "$VERSION_FILE" ]] && VERSION="$(grep '^commit=' "$VERSION_FILE" | cut -d= -f2)"
-echo "  Found: $BINARY  (commit: $VERSION)"
+[[ -f "$BINARY"     ]] && echo "  Found: $BINARY  (commit: $VERSION)"
+[[ -f "$MCP_BINARY" ]] && echo "  Found: $MCP_BINARY"
 echo
 
-ask_yn "Uninstall hiveshare?" "n" || { echo "Aborted."; exit 0; }
+ask_yn "Uninstall hiveshare CLI + MCP sidecar?" "n" || { echo "Aborted."; exit 0; }
 
 # ── remove binary ─────────────────────────────────────────────────────────────
 
-step "Removing binary"
+step "Removing binaries"
 
-rm -f "$BINARY"       && ok "Removed $BINARY"
-rm -f "$VERSION_FILE"  && ok "Removed $VERSION_FILE"
+[[ -f "$BINARY"          ]] && rm -f "$BINARY"          && ok "Removed $BINARY"
+[[ -f "$VERSION_FILE"    ]] && rm -f "$VERSION_FILE"    && ok "Removed $VERSION_FILE"
+[[ -f "$MCP_BINARY"      ]] && rm -f "$MCP_BINARY"      && ok "Removed $MCP_BINARY"
+[[ -f "$MCP_VERSION_FILE" ]] && rm -f "$MCP_VERSION_FILE" && ok "Removed $MCP_VERSION_FILE"
 
 # ── remove config ─────────────────────────────────────────────────────────────
 
@@ -63,6 +71,29 @@ if [[ -f "$CONFIG_FILE" ]]; then
 else
     ok "No config file found"
 fi
+
+# ── remove hiveshare from AI tool MCP configs ─────────────────────────────────
+
+step "AI tool config cleanup"
+
+dewire_ai_config() {
+    local cfg_file="$1" label="$2"
+    [[ ! -f "$cfg_file" ]] && return
+    if ! grep -q '"hiveshare"' "$cfg_file" 2>/dev/null; then
+        ok "$label: no hiveshare entry found"
+        return
+    fi
+    if [[ "$HAS_JQ" -eq 1 ]]; then
+        local tmp; tmp="$(mktemp)"
+        jq 'del(.mcpServers.hiveshare)' "$cfg_file" > "$tmp" && mv "$tmp" "$cfg_file"
+        ok "Removed hiveshare from $label ($cfg_file)"
+    else
+        warn "jq not found — remove the hiveshare entry manually from $cfg_file"
+    fi
+}
+
+dewire_ai_config "${HOME}/.claude/claude_desktop_config.json" "Claude Code"
+dewire_ai_config "${HOME}/.cursor/mcp.json"                   "Cursor"
 
 # ── remove PATH entry from shell profile ──────────────────────────────────────
 
@@ -97,5 +128,5 @@ fi
 # ── done ──────────────────────────────────────────────────────────────────────
 
 echo
-echo -e "${GREEN}${BOLD}Client uninstalled.${NC}"
+echo -e "${GREEN}${BOLD}Client and MCP sidecar uninstalled.${NC}"
 echo
