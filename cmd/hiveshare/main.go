@@ -915,12 +915,22 @@ func inviteCmd() *cobra.Command {
 			token, _ := result["token"].(string)
 			inviteURL := c.BaseURL + "/api/v1/invitations/" + token + "/accept"
 
+			expiresAt, _ := result["expires_at"].(string)
 			fmt.Printf("Invitation sent to %s\n", args[0])
-			fmt.Printf("Invite link: %s\n", inviteURL)
-			fmt.Printf("Token only:  %s\n", token)
-			fmt.Printf("Role: %s | Expires: %s\n", result["role"], result["expires_at"])
+			fmt.Printf("Role: %s | Expires: %s\n", result["role"], expiresAt)
 			fmt.Println()
-			fmt.Println("Share the link OR just the token (for MCP-only teammates who use accept_invite).")
+			fmt.Printf("Invite link : %s\n", inviteURL)
+			fmt.Printf("Token       : %s\n", token)
+			fmt.Println()
+			fmt.Println("── How to accept ────────────────────────────────────────")
+			fmt.Println()
+			fmt.Println("  CLI / curl (get an API key):")
+			fmt.Printf("    curl -X POST '%s' \\\n", inviteURL)
+			fmt.Println("      -H 'Content-Type: application/json' \\")
+			fmt.Println("      -d '{\"name\": \"Your Name\"}'")
+			fmt.Println()
+			fmt.Println("  MCP / Claude Code / Cursor (no terminal needed):")
+			fmt.Printf("    Tell your agent: \"Accept my hiveshare invite, token is %s, name is Your Name\"\n", token)
 			return nil
 		},
 	}
