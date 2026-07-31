@@ -37,6 +37,7 @@ func NewRouter(
 	views *store.ViewCounter,
 	pool *pgxpool.Pool,
 	rdb *redis.Client,
+	saStore *store.ServiceAccountStore,
 ) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -70,6 +71,7 @@ func NewRouter(
 	hs := NewHiveshareHandler(hsStore, metricsStore)
 	hive := NewHiveHandler(hiveStore, hsStore, metricsStore, historyStore, embedder, hub, worker, views)
 	met := NewMetricsHandler(metricsStore)
+	sa := NewServiceAccountHandler(saStore, hsStore)
 
 	r.Get("/health", healthHandler(pool, rdb))
 	r.Get("/openapi.yaml", serveOpenAPI)
@@ -79,6 +81,8 @@ func NewRouter(
 		// public — tighter IP-keyed limit to prevent account enumeration/invite abuse
 		r.With(middleware.Timeout(30*time.Second), publicLimit).Post("/auth/register", auth.Register)
 		r.With(middleware.Timeout(30*time.Second), publicLimit).Post("/invitations/{token}/accept", hs.AcceptInvite)
+		// SA token mint: key is the credential, no user session required
+		r.With(middleware.Timeout(10*time.Second), writeLimit).Post("/auth/service-accounts/token", sa.MintToken)
 
 		// authenticated
 		r.Group(func(r chi.Router) {
@@ -118,6 +122,10 @@ func NewRouter(
 
 				r.Get("/hiveshares/{id}/metrics", hs.Metrics)
 				r.Get("/metrics/me", met.UserMetrics)
+
+				r.Get("/hiveshares/{id}/service-accounts", sa.List)
+				r.With(writeLimit).Post("/hiveshares/{id}/service-accounts", sa.Create)
+				r.With(writeLimit).Delete("/hiveshares/{id}/service-accounts/{saId}", sa.Delete)
 			})
 
 			// SSE must not use the request timeout middleware

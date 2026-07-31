@@ -321,6 +321,42 @@ OpenShift manifests are in [`deploy/openshift/`](deploy/openshift/).
 
 ---
 
+## Related Projects
+
+HiveShare sits in a crowded space. Before adopting it, consider whether one of
+these fits your use case better.
+
+**[Beads](https://github.com/gastownhall/beads)** — a protocol for fine-grained
+agent-to-agent state passing. Better fit if you need structured, typed context
+flowing between specific agents in a pipeline rather than a searchable shared
+store for a whole team.
+
+**[mempalace](https://github.com/mempalace/mempalace)** — local per-user memory
+with skill-based retrieval. No shared server, no team sync. Better fit for
+individuals who want persistent personal context without the operational overhead
+of running a service.
+
+**[opendatahub knowledge-skills](https://github.com/opendatahub-io/knowledge-skills)** —
+skills that process merged PRs and push learnings back into the repo's
+agents.md/docs on a schedule. Better fit if your goal is improving the codebase's
+own context files rather than sharing ephemeral session context across teammates.
+
+**[Backlog.md](https://github.com/MrLesk/Backlog.md)** — todo and task state
+maintained as markdown inside the git repo itself. Not a memory tool; no overlap
+with HiveShare on search or sharing, but relevant if you're looking for
+agent-readable project state that lives in version control.
+
+**[repowise](https://github.com/repowise-dev/repowise)** — codebase intelligence
+local to the developer machine. Augments an agent's understanding of a single
+repo's structure. Complementary to HiveShare rather than a replacement.
+
+HiveShare's specific niche: a team of people sharing agents (not a pipeline)
+who need a searchable, self-hosted store for processed context that doesn't
+belong in the source system (Jira, GitHub) and changes at a pace where
+git-committed docs would be stale within a session.
+
+---
+
 ## Contributing
 
 Issues and PRs welcome. P0–P2 hardening is done; see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) section 7 for remaining V2/V3 scale work.

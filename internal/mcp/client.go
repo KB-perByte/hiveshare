@@ -66,11 +66,12 @@ func (c *APIClient) ListHiveshares(ctx context.Context) ([]map[string]interface{
 }
 
 // SearchHives performs a semantic or full-text search over hives in a hiveshare.
-func (c *APIClient) SearchHives(ctx context.Context, hiveshareID, query, sourceType string, limit int) (map[string]interface{}, error) {
+func (c *APIClient) SearchHives(ctx context.Context, hiveshareID, query, sourceType string, limit, maxAgeSecs int) (map[string]interface{}, error) {
 	payload := map[string]interface{}{
-		"query":       query,
-		"source_type": sourceType,
-		"limit":       limit,
+		"query":           query,
+		"source_type":     sourceType,
+		"limit":           limit,
+		"max_age_seconds": maxAgeSecs,
 	}
 	var result map[string]interface{}
 	path := fmt.Sprintf("/api/v1/hiveshares/%s/hives/search", hiveshareID)

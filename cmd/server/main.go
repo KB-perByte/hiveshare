@@ -60,6 +60,7 @@ func main() {
 	views.StartFlusher(ctx, 60*time.Second)
 
 	historyStore := store.NewHistoryStore(pool)
+	saStore := store.NewServiceAccountStore(pool)
 
 	worker := embed.NewWorker(embedder, hiveStore, 2, 64)
 	worker.Start(ctx, 2)
@@ -74,7 +75,7 @@ func main() {
 		go purgeHistory(ctx, historyStore, historyTTLDays, historyMaxVersions)
 	}
 
-	router := api.NewRouter(userStore, hsStore, hiveStore, metricsStore, historyStore, embedder, hub, worker, views, pool, rdb)
+	router := api.NewRouter(userStore, hsStore, hiveStore, metricsStore, historyStore, embedder, hub, worker, views, pool, rdb, saStore)
 
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {

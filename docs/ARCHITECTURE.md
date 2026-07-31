@@ -61,7 +61,7 @@ graph TB
 | Component | Implementation | File |
 |---|---|---|
 | HTTP router | chi v5 + httprate (per-endpoint: 10/min public by IP, 20/min writes, 30/min search, 200/min global), RequestSize 1MB, Timeout 30s (SSE excluded) | `internal/api/router.go` |
-| Auth | Bearer API key; **SHA-256 at rest**, cleartext only at register | `internal/api/middleware.go`, `store/users.go` |
+| Auth | Bearer API key (`hvs_`) or SA JWT; **SHA-256 at rest** for both; cleartext returned once at register / SA create; SA JWTs are HS256 signed with `JWT_SECRET` | `internal/api/middleware.go`, `store/users.go`, `store/service_accounts.go` |
 | DB pool | pgxpool MaxConns=20, MinConns=4, lifetimes set; `ivfflat.probes=10` AfterConnect | `internal/store/db.go` |
 | Vector search | pgvector **HNSW** cosine | `migrations/002_indexes.sql`, `003_hardening.sql` |
 | Search | **Hybrid**: BM25 (`ts_rank`) + cosine similarity blended by `alpha` (default 0.7). Falls back to full-text when no embedder configured. Response includes `"type": "hybrid"\|"fulltext"` | `internal/store/memory.go` (HiveStore) |
@@ -72,6 +72,8 @@ graph TB
 | Views | Redis `INCR`, flush to Postgres every 60s | `internal/store/views.go` |
 | usage_events TTL | Rolling delete > 90 days (daily job) | `cmd/server/main.go` |
 | History retention | Optional `HISTORY_TTL_DAYS` / `HISTORY_MAX_VERSIONS` (default 0 = forever) | `cmd/server/main.go` |
+| Hive TTL | Nullable `expires_at` on hives; expired rows excluded from all reads/search automatically | `migrations/007_hive_ttl.sql`, `store/memory.go` |
+| Service accounts | `hvsa_` keys; JWT exchange via `POST /auth/service-accounts/token`; `JWT_SECRET` + `SA_TOKEN_TTL_MINUTES` | `migrations/008_service_accounts.sql`, `store/service_accounts.go`, `api/service_account_handler.go` |
 | Health | `GET /health` — DB + Redis ping | `internal/api/router.go` |
 | Logging | `slog` JSON | `cmd/server/main.go` |
 | MCP server | stdio JSON-RPC; 10 tools; starts without API key (limited to `accept_invite`) for first-time onboarding | `internal/mcp/server.go` |
@@ -110,8 +112,11 @@ All items below were found in the initial review and are **fixed in tree**.
 | 2.23 | Binary vector-or-fulltext search choice | Hybrid CTE: `alpha × cosine + (1-alpha) × BM25`; `alpha` is per-request (default 0.7) |
 | 2.24 | MCP had 5 tools, no onboarding path for new users | 10 tools; `accept_invite` works pre-API-key; server starts without key in limited mode |
 | 2.25 | MCP default hiveshare was global-only | `hiveshare use --project` writes to `.claude/settings.json` — committable, teammates pick it up automatically |
+| 2.26 | Unknown invite role defaulted to `all` (fail-open) | Fixed: unknown/empty role now defaults to `view` in handler + both store functions |
+| 2.27 | No record TTL — volatile state (CI status, PR review) could serve stale results forever | `expires_at` column on hives; `ttl_seconds`/`expires_at` on create/update; `max_age_seconds` on search |
+| 2.28 | Static keys only — no path for zero-interaction CI agents | Service accounts (`hvsa_` keys) + JWT mint endpoint; SA tokens accepted in `AuthMiddleware` |
 
-**Ops note:** Existing plaintext API keys will not authenticate after the hash change — users must re-register (or accept a fresh invite). Apply migrations through `006_hive_history.sql` (`make migrate` or `scripts/install-server.sh`).
+**Ops note:** Existing plaintext API keys will not authenticate after the hash change — users must re-register (or accept a fresh invite). Apply migrations through `008_service_accounts.sql` (`make migrate` or `scripts/install-server.sh`).
 
 ---
 

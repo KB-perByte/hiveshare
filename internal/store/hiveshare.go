@@ -185,7 +185,7 @@ func (s *HiveshareStore) RemoveMember(ctx context.Context, hiveshareID, userID u
 func (s *HiveshareStore) AddMember(ctx context.Context, hiveshareID, userID, invitedBy uuid.UUID, role string) error {
 	role = models.NormalizeRole(role)
 	if role != models.RoleAll && role != models.RoleView {
-		role = models.RoleAll
+		role = models.RoleView
 	}
 	_, err := s.db.Exec(ctx,
 		`INSERT INTO hiveshare_members (hiveshare_id, user_id, role, invited_by)
@@ -201,7 +201,7 @@ func (s *HiveshareStore) AddMember(ctx context.Context, hiveshareID, userID, inv
 func (s *HiveshareStore) CreateInvitation(ctx context.Context, inv *models.Invitation) error {
 	inv.Role = models.NormalizeRole(inv.Role)
 	if inv.Role != models.RoleAll && inv.Role != models.RoleView {
-		inv.Role = models.RoleAll
+		inv.Role = models.RoleView
 	}
 	return s.db.QueryRow(ctx,
 		`INSERT INTO invitations (hiveshare_id, email, invited_by, token, role)

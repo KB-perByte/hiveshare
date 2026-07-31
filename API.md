@@ -13,6 +13,11 @@
 - [Auth](#auth)
   - [POST /api/v1/auth/register](#post-register)
   - [GET /api/v1/auth/whoami](#get-whoami)
+  - [POST /api/v1/auth/service-accounts/token](#post-sa-token)
+- [Service Accounts](#service-accounts)
+  - [GET /api/v1/hiveshares/{id}/service-accounts](#get-service-accounts)
+  - [POST /api/v1/hiveshares/{id}/service-accounts](#post-create-service-account)
+  - [DELETE /api/v1/hiveshares/{id}/service-accounts/{saId}](#delete-service-account)
 - [Hiveshares](#hiveshares)
   - [POST /api/v1/hiveshares](#post-create-hiveshare)
   - [GET /api/v1/hiveshares](#get-list-hiveshares)
@@ -53,11 +58,14 @@
 
 Base URL: `http://localhost:8080` (configurable via `BASE_URL` env var)
 
-**Authentication:** All endpoints except `/health`, `/api/v1/auth/register`, and `/api/v1/invitations/{token}/accept` require a Bearer token in the `Authorization` header:
+**Authentication:** All endpoints except `/health`, `/api/v1/auth/register`, `/api/v1/invitations/{token}/accept`, and `/api/v1/auth/service-accounts/token` require a Bearer token in the `Authorization` header. Two token formats are accepted:
 
 ```
-Authorization: Bearer hvs_<token>
+Authorization: Bearer hvs_<token>   # personal user API key
+Authorization: Bearer <jwt>         # service account JWT (two-dot format)
 ```
+
+Service account JWTs are obtained by calling `POST /auth/service-accounts/token` with an `hvsa_` service account key.
 
 **Rate limiting:** Per-endpoint limits, keyed by API key (or IP for unauthenticated requests). Returns `429` when exceeded.
 
@@ -169,6 +177,135 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
 **Example:**
 ```bash
 curl http://localhost:8080/api/v1/auth/whoami \
+  -H "Authorization: Bearer hvs_YOUR_API_KEY"
+```
+
+---
+
+### POST SA Token
+
+`POST /api/v1/auth/service-accounts/token`
+
+**Auth:** Bearer `hvsa_<key>` — service account key (not a user `hvs_` key). No user session required.
+
+**Rate limit:** 20 req/min by key.
+
+Exchanges a long-lived service account key for a short-lived JWT. Use the returned JWT as a normal Bearer token for subsequent API calls. JWT lifetime is controlled by `SA_TOKEN_TTL_MINUTES` (default 15 minutes).
+
+**Response:** `200 OK`
+```json
+{
+  "token": "<signed-jwt>",
+  "expires_in": 900,
+  "role": "view"
+}
+```
+
+**Error responses:**
+- `401` — missing, invalid, or unknown `hvsa_` key
+
+**Example:**
+```bash
+# Exchange service account key for a JWT
+TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/service-accounts/token \
+  -H "Authorization: Bearer hvsa_YOUR_SA_KEY" | jq -r .token)
+
+# Use the JWT for a search
+curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/search \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"CI status"}'
+```
+
+---
+
+## Service Accounts
+
+Service accounts are non-human identities for CI pipelines and automated agents. They use `hvsa_` prefixed keys (SHA-256 hashed at rest) and exchange them for short-lived JWTs via `POST /auth/service-accounts/token`. No invite flow is required — an admin pre-creates the account.
+
+### GET Service Accounts
+
+`GET /api/v1/hiveshares/{id}/service-accounts`
+
+**Auth:** Required
+**Access:** role `all`
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": "uuid",
+    "hiveshare_id": "uuid",
+    "name": "ci-pipeline",
+    "role": "view",
+    "created_at": "2026-07-31T10:00:00Z",
+    "last_used_at": "2026-07-31T14:23:00Z"
+  }
+]
+```
+
+**Example:**
+```bash
+curl http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/service-accounts \
+  -H "Authorization: Bearer hvs_YOUR_API_KEY"
+```
+
+---
+
+### POST Create Service Account
+
+`POST /api/v1/hiveshares/{id}/service-accounts`
+
+**Auth:** Required
+**Access:** role `all`
+
+**Request body:**
+```json
+{
+  "name": "ci-pipeline",
+  "role": "view"
+}
+```
+
+`role` is `all` or `view`. Defaults to `view` when omitted.
+
+**Response:** `201 Created` — the `key` field is the cleartext `hvsa_` key, returned **once only**. Store it securely.
+```json
+{
+  "id": "uuid",
+  "hiveshare_id": "uuid",
+  "name": "ci-pipeline",
+  "role": "view",
+  "created_at": "2026-07-31T10:00:00Z",
+  "key": "hvsa_<48 hex chars>"
+}
+```
+
+**Example:**
+```bash
+curl -X POST http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/service-accounts \
+  -H "Authorization: Bearer hvs_YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"ci-pipeline","role":"view"}'
+```
+
+---
+
+### DELETE Service Account
+
+`DELETE /api/v1/hiveshares/{id}/service-accounts/{saId}`
+
+**Auth:** Required
+**Access:** role `all`
+
+**Response:** `204 No Content`
+
+**Error responses:**
+- `404` — service account not found
+
+**Example:**
+```bash
+curl -X DELETE http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/service-accounts/SA_ID \
   -H "Authorization: Bearer hvs_YOUR_API_KEY"
 ```
 
@@ -349,7 +486,7 @@ curl -X DELETE http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID \
 }
 ```
 
-`role` is `all` (read/write/invite) or `view` (read-only). Defaults to `all`.
+`role` is `all` (read/write/invite) or `view` (read-only). Defaults to `view` when omitted or unrecognised.
 
 **Response:** `201 Created`
 ```json
@@ -513,8 +650,10 @@ curl -X DELETE http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/members/USER
 | `summary` | No | Short summary |
 | `tags` | No | Array of strings |
 | `metadata` | No | Arbitrary JSON object |
+| `ttl_seconds` | No | Auto-expire after N seconds from now. `0` = never |
+| `expires_at` | No | Explicit RFC3339 expiry timestamp. Overrides `ttl_seconds` if both given |
 
-Embedding is generated asynchronously after creation. If the embedding provider is available, the content is embedded synchronously first to check for duplicates; if a near-identical hive already exists for the same `source_ref`, `409 Conflict` is returned instead.
+Expired hives (past `expires_at`) are automatically excluded from all reads and searches. Embedding is generated asynchronously after creation. If the embedding provider is available, the content is embedded synchronously first to check for duplicates; if a near-identical hive already exists for the same `source_ref`, `409 Conflict` is returned instead.
 
 **Query parameters:**
 
@@ -540,7 +679,8 @@ Embedding is generated asynchronously after creation. If the embedding provider 
   "views": 0,
   "reuses": 0,
   "created_at": "2026-07-22T10:00:00Z",
-  "updated_at": "2026-07-22T10:00:00Z"
+  "updated_at": "2026-07-22T10:00:00Z",
+  "expires_at": null
 }
 ```
 
@@ -633,7 +773,8 @@ Returns the full entry including content. Increments view counter.
   "views": 6,
   "reuses": 2,
   "created_at": "2026-07-22T10:00:00Z",
-  "updated_at": "2026-07-22T10:00:00Z"
+  "updated_at": "2026-07-22T10:00:00Z",
+  "expires_at": null
 }
 ```
 
@@ -660,11 +801,13 @@ curl http://localhost:8080/api/v1/hiveshares/HIVESHARE_ID/hives/ENTRY_ID \
 {
   "content": "Updated analysis...",
   "summary": "Updated summary",
-  "tags": ["auth", "updated"]
+  "tags": ["auth", "updated"],
+  "ttl_seconds": 86400,
+  "expires_at": "2026-08-31T00:00:00Z"
 }
 ```
 
-All fields are optional. Updating content triggers re-embedding.
+All fields are optional. Updating content triggers re-embedding. Pass `ttl_seconds` or `expires_at` to set or change expiry; omit both to leave the existing expiry unchanged.
 
 **Response:** `200 OK` (returns the updated entry)
 
@@ -723,6 +866,7 @@ Uses **hybrid search** when embeddings are enabled: blends cosine similarity and
 | `source_type` | No | | Filter results by source type |
 | `limit` | No | `10` | Max results |
 | `alpha` | No | `0.7` | Blend ratio: `1.0` = pure vector, `0.0` = pure full-text |
+| `max_age_seconds` | No | `0` | Exclude hives not updated within N seconds. `0` = no filter. Use for volatile state like CI status |
 
 **Response:** `200 OK`
 ```json

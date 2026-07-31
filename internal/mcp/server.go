@@ -189,7 +189,8 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]inte
 		}
 		sourceType := stringArg(args, "source_type")
 		limit := intArg(args, "limit", 10)
-		return s.client.SearchHives(ctx, hsID, query, sourceType, limit)
+		maxAgeSecs := intArg(args, "max_age_seconds", 0)
+		return s.client.SearchHives(ctx, hsID, query, sourceType, limit, maxAgeSecs)
 
 	case "add_hive":
 		content := stringArg(args, "content")
@@ -206,6 +207,7 @@ func (s *Server) callTool(ctx context.Context, name string, args map[string]inte
 			"summary":     stringArg(args, "summary"),
 			"tool":        stringArgDefault(args, "tool", "claude"),
 			"tags":        sliceArg(args, "tags"),
+			"ttl_seconds": intArg(args, "ttl_seconds", 0),
 		}
 		return s.client.AddHive(ctx, hsID, entry)
 
@@ -293,10 +295,11 @@ func tools() []Tool {
 			InputSchema: InputSchema{
 				Type: "object",
 				Properties: map[string]Property{
-					"query":        {Type: "string", Description: "Search query"},
-					"hiveshare_id": {Type: "string", Description: "Hiveshare UUID (uses default if omitted)"},
-					"source_type":  {Type: "string", Description: "Filter by source type: jira, github_issue, github_pr, file, url, manual"},
-					"limit":        {Type: "integer", Description: "Max results (default 10)"},
+					"query":           {Type: "string", Description: "Search query"},
+					"hiveshare_id":    {Type: "string", Description: "Hiveshare UUID (uses default if omitted)"},
+					"source_type":     {Type: "string", Description: "Filter by source type: jira, github_issue, github_pr, file, url, manual"},
+					"limit":           {Type: "integer", Description: "Max results (default 10)"},
+					"max_age_seconds": {Type: "integer", Description: "Only return hives updated within this many seconds (0 = no filter). Use for volatile data like CI status."},
 				},
 				Required: []string{"query"},
 			},
@@ -315,6 +318,7 @@ func tools() []Tool {
 					"tool":         {Type: "string", Description: "Tool used: claude, cursor, manual"},
 					"hiveshare_id": {Type: "string", Description: "Hiveshare UUID (uses default if omitted)"},
 					"tags":         {Type: "string", Description: "Comma-separated tags (optional)"},
+					"ttl_seconds":  {Type: "integer", Description: "Auto-expire after this many seconds (0 = never). Use for volatile data like CI status or PR state."},
 				},
 				Required: []string{"content", "source_type", "source_ref"},
 			},

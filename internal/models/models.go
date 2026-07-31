@@ -17,6 +17,9 @@ type User struct {
 	Name      string    `json:"name"`
 	APIKey    string    `json:"api_key,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	// SARole is set only on synthetic users constructed from service account JWTs.
+	// It carries the SA's role for the IsMember check bypass. Never persisted or serialised.
+	SARole string `json:"-"`
 }
 
 // Hiveshare is a collaborative workspace shared among a team. Role and
@@ -82,7 +85,20 @@ type Hive struct {
 	Reuses      int                    `json:"reuses"`
 	CreatedAt   time.Time              `json:"created_at"`
 	UpdatedAt   time.Time             `json:"updated_at,omitempty"`
+	ExpiresAt   *time.Time             `json:"expires_at,omitempty"`
 	Score       float64                `json:"score,omitempty"`
+}
+
+// ServiceAccount is a non-human identity used by CI agents and automated pipelines.
+// The long-lived key mints short-lived JWTs via POST /service-accounts/{id}/token.
+type ServiceAccount struct {
+	ID          uuid.UUID  `json:"id"`
+	HiveshareID uuid.UUID  `json:"hiveshare_id"`
+	Name        string     `json:"name"`
+	Role        string     `json:"role"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
+	Key         string     `json:"key,omitempty"` // cleartext, returned once at creation
 }
 
 // UsageEvent records a single analytics event (add, view, search, invite_sent, etc.)

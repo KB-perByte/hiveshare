@@ -92,6 +92,11 @@ func (c *authCache) removeLocked(keyHash string) {
 // AuthMiddleware extracts the Bearer token from the Authorization header,
 // resolves it to a User (with a short-lived in-process cache), and injects the
 // user into the request context. Returns 401 for missing or invalid tokens.
+//
+// Two token formats are accepted:
+//   - hvs_… API key → resolved via UserStore (existing path)
+//   - JWT (contains two dots) → validated as a service account token; a synthetic
+//     User is constructed from the JWT claims (no DB round-trip needed)
 func AuthMiddleware(us *store.UserStore) func(http.Handler) http.Handler {
 	cache := newAuthCache()
 	return func(next http.Handler) http.Handler {
@@ -103,6 +108,22 @@ func AuthMiddleware(us *store.UserStore) func(http.Handler) http.Handler {
 				return
 			}
 
+			// JWT path: service account short-lived token
+			if strings.Count(token, ".") == 2 {
+				_, role, err := ValidateServiceAccountJWT(token)
+				if err != nil {
+					writeError(w, http.StatusUnauthorized, "invalid service account token")
+					return
+				}
+				// Inject a synthetic user carrying only the role needed by handlers.
+				// Real user identity is not available; SA tokens are scoped to a hiveshare.
+				synthetic := &models.User{Name: "service-account", SARole: role}
+				ctx := context.WithValue(r.Context(), ctxUser, synthetic)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// hvs_ API key path
 			keyHash := store.HashAPIKey(token)
 			if user, ok := cache.get(keyHash); ok {
 				ctx := context.WithValue(r.Context(), ctxUser, user)

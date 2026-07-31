@@ -65,8 +65,10 @@ The script will:
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | — |
 | `HISTORY_TTL_DAYS` | `0` | Purge history rows older than N days (`0` = keep forever) |
 | `HISTORY_MAX_VERSIONS` | `0` | Keep at most N versions per hive (`0` = unlimited) |
+| `JWT_SECRET` | — | Secret key for signing service account JWTs. Required when using service accounts |
+| `SA_TOKEN_TTL_MINUTES` | `15` | Lifetime of JWTs issued to service accounts |
 
-Migrations `001`–`006` are applied by the installer (`005` renames `memory_entries` → `hives`; `006` adds `hives_history` + snapshots).
+Migrations `001`–`008` are applied by the installer (`005` renames `memory_entries` → `hives`; `006` adds `hives_history` + snapshots; `007` adds `expires_at` TTL column; `008` adds `service_accounts` table).
 
 ### Running the server
 

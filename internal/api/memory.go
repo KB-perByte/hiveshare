@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -48,7 +49,11 @@ func (h *HiveHandler) requireAccess(r *http.Request, w http.ResponseWriter, writ
 		writeError(w, http.StatusBadRequest, "invalid hiveshare id")
 		return uuid.Nil, false
 	}
-	role, _ := h.hs.IsMember(r.Context(), id, u.ID)
+	// Service account tokens carry their role in the JWT; skip the DB membership check.
+	role := u.SARole
+	if role == "" {
+		role, _ = h.hs.IsMember(r.Context(), id, u.ID)
+	}
 	if !models.CanView(role) {
 		writeError(w, http.StatusForbidden, "not a member of this hiveshare")
 		return uuid.Nil, false
@@ -104,6 +109,8 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Summary    string                 `json:"summary"`
 		Tags       []string               `json:"tags"`
 		Metadata   map[string]interface{} `json:"metadata"`
+		ExpiresAt  *time.Time             `json:"expires_at"`
+		TTLSeconds int                    `json:"ttl_seconds"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -123,6 +130,10 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Metadata = map[string]interface{}{}
 	}
 
+	if req.TTLSeconds > 0 {
+		t := time.Now().Add(time.Duration(req.TTLSeconds) * time.Second)
+		req.ExpiresAt = &t
+	}
 	entry := &models.Hive{
 		HiveshareID: hsID,
 		UserID:      u.ID,
@@ -134,6 +145,7 @@ func (h *HiveHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Summary:     req.Summary,
 		Tags:        req.Tags,
 		Metadata:    req.Metadata,
+		ExpiresAt:   req.ExpiresAt,
 	}
 
 	// Semantic dedup: opt-in via ?dedup_threshold=0.95 (default 0 = disabled).
@@ -245,9 +257,11 @@ func (h *HiveHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Content string   `json:"content"`
-		Summary string   `json:"summary"`
-		Tags    []string `json:"tags"`
+		Content    string     `json:"content"`
+		Summary    string     `json:"summary"`
+		Tags       []string   `json:"tags"`
+		ExpiresAt  *time.Time `json:"expires_at"`
+		TTLSeconds int        `json:"ttl_seconds"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -257,7 +271,11 @@ func (h *HiveHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
-	entry, err := h.mem.Update(r.Context(), entryID, hsID, req.Content, req.Summary, req.Tags)
+	if req.TTLSeconds > 0 {
+		t := time.Now().Add(time.Duration(req.TTLSeconds) * time.Second)
+		req.ExpiresAt = &t
+	}
+	entry, err := h.mem.Update(r.Context(), entryID, hsID, req.Content, req.Summary, req.Tags, req.ExpiresAt)
 	if err != nil {
 		writeDBError(w, "could not update hive", err)
 		return
@@ -320,10 +338,11 @@ func (h *HiveHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Query      string  `json:"query"`
-		SourceType string  `json:"source_type"`
-		Limit      int     `json:"limit"`
-		Alpha      float64 `json:"alpha"` // 0=full-text only, 1=vector only, default 0.7
+		Query       string  `json:"query"`
+		SourceType  string  `json:"source_type"`
+		Limit       int     `json:"limit"`
+		Alpha       float64 `json:"alpha"` // 0=full-text only, 1=vector only, default 0.7
+		MaxAgeSecs  int     `json:"max_age_seconds"`
 	}
 	if err := decodeJSON(r, &req); err != nil || req.Query == "" {
 		writeError(w, http.StatusBadRequest, "query is required")
@@ -342,9 +361,9 @@ func (h *HiveHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	if emb, embErr := h.embedder.Embed(r.Context(), req.Query); embErr == nil && len(emb) > 0 {
 		searchType = "hybrid"
-		entries, err = h.mem.SearchHybrid(r.Context(), hsID, emb, req.Query, req.SourceType, req.Alpha, req.Limit)
+		entries, err = h.mem.SearchHybrid(r.Context(), hsID, emb, req.Query, req.SourceType, req.Alpha, req.Limit, req.MaxAgeSecs)
 	} else {
-		entries, err = h.mem.SearchFullText(r.Context(), hsID, req.Query, req.SourceType, req.Limit)
+		entries, err = h.mem.SearchFullText(r.Context(), hsID, req.Query, req.SourceType, req.Limit, req.MaxAgeSecs)
 	}
 	if err != nil {
 		writeDBError(w, "search failed", err)

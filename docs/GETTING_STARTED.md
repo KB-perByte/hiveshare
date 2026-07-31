@@ -280,6 +280,8 @@ The installer will:
 | `BASE_URL` | Public URL — used in invite links |
 | `EMBED_PROVIDER` | `openai` or `ollama` — enables semantic search |
 | `OPENAI_API_KEY` | Required when `EMBED_PROVIDER=openai` |
+| `JWT_SECRET` | Required when using service accounts — signs short-lived JWTs |
+| `SA_TOKEN_TTL_MINUTES` | Default `15` — lifetime of service account JWTs |
 
 Verify the server is running:
 

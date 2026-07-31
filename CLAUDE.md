@@ -16,7 +16,7 @@ internal/
   store/      → Postgres (db.go, memory.go=HiveStore, history.go, …)
   realtime/   → SSE hub (Redis pub/sub)
   embed/      → async embedding worker (OpenAI / Ollama)
-migrations/   → 001–006 applied in order
+migrations/   → 001–008 applied in order
 API.md        → HTTP reference (verified by scripts/test-api-examples.sh)
 deploy/       → OpenShift manifests
 ```
@@ -46,6 +46,8 @@ Binaries: `bin/hiveshare-server`, `bin/hiveshare-mcp`, `bin/hiveshare`
 | `OPENAI_API_KEY` | Required when `EMBED_PROVIDER=openai` |
 | `HISTORY_TTL_DAYS` | Optional purge age (`0` = forever) |
 | `HISTORY_MAX_VERSIONS` | Optional per-hive version cap (`0` = unlimited) |
+| `JWT_SECRET` | Required for service account JWT signing |
+| `SA_TOKEN_TTL_MINUTES` | Default `15`; lifetime of service account JWTs |
 
 ## Naming: hive vs memory
 
@@ -53,7 +55,10 @@ The entity was renamed from `memory_entry` → `hive` in migration 005. The Go t
 
 ## Auth
 
-API keys are prefixed `hvs_`, SHA-256 hashed at rest. Cleartext returned only at registration. All API endpoints require `Authorization: Bearer hvs_…`.
+User API keys are prefixed `hvs_`, SHA-256 hashed at rest. Cleartext returned only at registration.
+Service account keys are prefixed `hvsa_`, also SHA-256 hashed at rest. Cleartext returned only at creation.
+`POST /auth/service-accounts/token` exchanges an `hvsa_` key for a short-lived JWT (`SA_TOKEN_TTL_MINUTES`, default 15 min), signed with `JWT_SECRET`.
+Auth middleware accepts `Authorization: Bearer hvs_<key>` (user) or `Authorization: Bearer <jwt>` (service account — identified by two dots).
 
 ## Writes / search / history flow
 
@@ -84,7 +89,7 @@ Run `scripts/install-client.sh` once per machine. Run `hiveshare use <id> --proj
 
 ## Migrations
 
-Apply with `make migrate`, `scripts/install-server.sh`, or `psql -f migrations/NNN_*.sql` in order through **006**. Files are mostly idempotent (`IF NOT EXISTS` / `OR REPLACE`).
+Apply with `make migrate`, `scripts/install-server.sh`, or `psql -f migrations/NNN_*.sql` in order through **008**. Files are mostly idempotent (`IF NOT EXISTS` / `OR REPLACE`).
 
 ## Go module
 

@@ -143,7 +143,7 @@ func (h *HiveshareHandler) Invite(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Role = models.NormalizeRole(req.Role)
 	if req.Role != models.RoleAll && req.Role != models.RoleView {
-		req.Role = models.RoleAll
+		req.Role = models.RoleView
 	}
 
 	tokenBytes := make([]byte, 24)

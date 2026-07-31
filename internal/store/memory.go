@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/KB-perByte/hiveshare/internal/models"
 	"github.com/google/uuid"
@@ -37,12 +38,12 @@ func (s *HiveStore) Create(ctx context.Context, e *models.Hive, embedding []floa
 
 	err := s.db.QueryRow(ctx,
 		`INSERT INTO hives
-		 (hiveshare_id, user_id, source_type, source_ref, source_url, tool, content, summary, embedding, tags, metadata)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		 RETURNING id, created_at, updated_at`,
+		 (hiveshare_id, user_id, source_type, source_ref, source_url, tool, content, summary, embedding, tags, metadata, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		 RETURNING id, created_at, updated_at, expires_at`,
 		e.HiveshareID, e.UserID, e.SourceType, e.SourceRef, e.SourceURL,
-		e.Tool, e.Content, e.Summary, embVal, e.Tags, e.Metadata,
-	).Scan(&e.ID, &e.CreatedAt, &e.UpdatedAt)
+		e.Tool, e.Content, e.Summary, embVal, e.Tags, e.Metadata, e.ExpiresAt,
+	).Scan(&e.ID, &e.CreatedAt, &e.UpdatedAt, &e.ExpiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("create memory entry: %w", err)
 	}
@@ -61,7 +62,10 @@ func (s *HiveStore) List(ctx context.Context, hiveshareID uuid.UUID, f ListHiveF
 	if f.Limit == 0 {
 		f.Limit = 50
 	}
-	wheres := []string{"me.hiveshare_id = $1"}
+	wheres := []string{
+		"me.hiveshare_id = $1",
+		"(me.expires_at IS NULL OR me.expires_at > NOW())",
+	}
 	args := []interface{}{hiveshareID}
 	n := 2
 
@@ -104,10 +108,11 @@ func (s *HiveStore) List(ctx context.Context, hiveshareID uuid.UUID, f ListHiveF
 func (s *HiveStore) Get(ctx context.Context, id, hiveshareID uuid.UUID) (*models.Hive, error) {
 	rows, err := s.scanRows(ctx,
 		`SELECT me.id, me.hiveshare_id, me.user_id, u.name, me.source_type, me.source_ref, me.source_url,
-		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at
+		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at, me.expires_at
 		 FROM hives me
 		 JOIN users u ON u.id = me.user_id
-		 WHERE me.id = $1 AND me.hiveshare_id = $2`, id, hiveshareID,
+		 WHERE me.id = $1 AND me.hiveshare_id = $2
+		   AND (me.expires_at IS NULL OR me.expires_at > NOW())`, id, hiveshareID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get memory entry: %w", err)
@@ -118,16 +123,19 @@ func (s *HiveStore) Get(ctx context.Context, id, hiveshareID uuid.UUID) (*models
 	return rows[0], nil
 }
 
-func (s *HiveStore) Update(ctx context.Context, id, hiveshareID uuid.UUID, content, summary string, tags []string) (*models.Hive, error) {
+// Update updates content, summary, tags, and optionally expires_at for a hive.
+// Pass a nil expiresAt to leave the existing value unchanged.
+func (s *HiveStore) Update(ctx context.Context, id, hiveshareID uuid.UUID, content, summary string, tags []string, expiresAt *time.Time) (*models.Hive, error) {
 	var e models.Hive
 	err := s.db.QueryRow(ctx,
-		`UPDATE hives SET content = $3, summary = $4, tags = $5, embedding = NULL, updated_at = NOW()
+		`UPDATE hives SET content = $3, summary = $4, tags = $5, embedding = NULL, updated_at = NOW(),
+		                  expires_at = COALESCE($6, expires_at)
 		 WHERE id = $1 AND hiveshare_id = $2
 		 RETURNING id, hiveshare_id, user_id, source_type, source_ref, source_url, tool,
-		           content, summary, tags, metadata, views, reuses, created_at, updated_at`,
-		id, hiveshareID, content, summary, tags,
+		           content, summary, tags, metadata, views, reuses, created_at, updated_at, expires_at`,
+		id, hiveshareID, content, summary, tags, expiresAt,
 	).Scan(&e.ID, &e.HiveshareID, &e.UserID, &e.SourceType, &e.SourceRef, &e.SourceURL,
-		&e.Tool, &e.Content, &e.Summary, &e.Tags, &e.Metadata, &e.Views, &e.Reuses, &e.CreatedAt, &e.UpdatedAt)
+		&e.Tool, &e.Content, &e.Summary, &e.Tags, &e.Metadata, &e.Views, &e.Reuses, &e.CreatedAt, &e.UpdatedAt, &e.ExpiresAt)
 	if err != nil {
 		return nil, fmt.Errorf("update memory entry: %w", err)
 	}
@@ -151,7 +159,11 @@ func (s *HiveStore) SearchVector(ctx context.Context, hiveshareID uuid.UUID, emb
 	if limit == 0 {
 		limit = 10
 	}
-	wheres := []string{"me.hiveshare_id = $1", "me.embedding IS NOT NULL"}
+	wheres := []string{
+		"me.hiveshare_id = $1",
+		"me.embedding IS NOT NULL",
+		"(me.expires_at IS NULL OR me.expires_at > NOW())",
+	}
 	args := []interface{}{hiveshareID, pgvector.NewVector(embedding)}
 	n := 3
 
@@ -164,7 +176,7 @@ func (s *HiveStore) SearchVector(ctx context.Context, hiveshareID uuid.UUID, emb
 
 	q := fmt.Sprintf(
 		`SELECT me.id, me.hiveshare_id, me.user_id, u.name, me.source_type, me.source_ref, me.source_url,
-		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at,
+		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at, me.expires_at,
 		        1 - (me.embedding <=> $2) AS score
 		 FROM hives me
 		 JOIN users u ON u.id = me.user_id
@@ -177,13 +189,15 @@ func (s *HiveStore) SearchVector(ctx context.Context, hiveshareID uuid.UUID, emb
 }
 
 // SearchFullText performs PostgreSQL full-text search.
-func (s *HiveStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID, query, sourceType string, limit int) ([]*models.Hive, error) {
+// maxAgeSecs filters to entries updated within the last N seconds (0 = no filter).
+func (s *HiveStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID, query, sourceType string, limit, maxAgeSecs int) ([]*models.Hive, error) {
 	if limit == 0 {
 		limit = 10
 	}
 	wheres := []string{
 		"me.hiveshare_id = $1",
 		"to_tsvector('english', me.content) @@ plainto_tsquery('english', $2)",
+		"(me.expires_at IS NULL OR me.expires_at > NOW())",
 	}
 	args := []interface{}{hiveshareID, query}
 	n := 3
@@ -193,11 +207,16 @@ func (s *HiveStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID, q
 		args = append(args, sourceType)
 		n++
 	}
+	if maxAgeSecs > 0 {
+		wheres = append(wheres, fmt.Sprintf("me.updated_at >= NOW() - ($%d * interval '1 second')", n))
+		args = append(args, maxAgeSecs)
+		n++
+	}
 	args = append(args, limit)
 
 	q := fmt.Sprintf(
 		`SELECT me.id, me.hiveshare_id, me.user_id, u.name, me.source_type, me.source_ref, me.source_url,
-		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at,
+		        me.tool, me.content, me.summary, me.tags, me.metadata, me.views, me.reuses, me.created_at, me.updated_at, me.expires_at,
 		        ts_rank(to_tsvector('english', me.content), plainto_tsquery('english', $2)) AS score
 		 FROM hives me
 		 JOIN users u ON u.id = me.user_id
@@ -209,10 +228,10 @@ func (s *HiveStore) SearchFullText(ctx context.Context, hiveshareID uuid.UUID, q
 	return s.scanRowsWithScore(ctx, q, args...)
 }
 
-// This is fun, SearchHybrid blends cosine similarity and BM25 full-text scores.
-// alpha=1.0 is pure vector, alpha=0.0 is pure full-text. Requires a valid
-// embedding when alpha > 0; callers should fall back to SearchFullText otherwise.
-func (s *HiveStore) SearchHybrid(ctx context.Context, hiveshareID uuid.UUID, embedding []float32, query, sourceType string, alpha float64, limit int) ([]*models.Hive, error) {
+// SearchHybrid blends cosine similarity and BM25 full-text scores.
+// alpha=1.0 is pure vector, alpha=0.0 is pure full-text.
+// maxAgeSecs filters to entries updated within the last N seconds (0 = no filter).
+func (s *HiveStore) SearchHybrid(ctx context.Context, hiveshareID uuid.UUID, embedding []float32, query, sourceType string, alpha float64, limit, maxAgeSecs int) ([]*models.Hive, error) {
 	if limit == 0 {
 		limit = 10
 	}
@@ -223,21 +242,29 @@ func (s *HiveStore) SearchHybrid(ctx context.Context, hiveshareID uuid.UUID, emb
 		alpha = 1
 	}
 
-	sourceFilter := ""
 	args := []interface{}{hiveshareID, pgvector.NewVector(embedding), query, alpha}
 	n := 5
+
+	var extraFilters []string
 	if sourceType != "" {
-		sourceFilter = fmt.Sprintf("AND me.source_type = $%d", n)
+		extraFilters = append(extraFilters, fmt.Sprintf("AND me.source_type = $%d", n))
 		args = append(args, sourceType)
 		n++
 	}
+	if maxAgeSecs > 0 {
+		extraFilters = append(extraFilters, fmt.Sprintf("AND me.updated_at >= NOW() - ($%d * interval '1 second')", n))
+		args = append(args, maxAgeSecs)
+		n++
+	}
 	args = append(args, limit)
+	extraClause := strings.Join(extraFilters, " ")
 
 	q := fmt.Sprintf(`
 		WITH vec AS (
 			SELECT id, 1 - (embedding <=> $2) AS vscore
 			FROM hives
 			WHERE hiveshare_id = $1 AND embedding IS NOT NULL
+			  AND (expires_at IS NULL OR expires_at > NOW())
 		),
 		fts AS (
 			SELECT id,
@@ -245,11 +272,12 @@ func (s *HiveStore) SearchHybrid(ctx context.Context, hiveshareID uuid.UUID, emb
 			FROM hives
 			WHERE hiveshare_id = $1
 			  AND to_tsvector('english', content) @@ plainto_tsquery('english', $3)
+			  AND (expires_at IS NULL OR expires_at > NOW())
 		)
 		SELECT me.id, me.hiveshare_id, me.user_id, u.name,
 			   me.source_type, me.source_ref, me.source_url,
 			   me.tool, me.content, me.summary, me.tags, me.metadata,
-			   me.views, me.reuses, me.created_at, me.updated_at,
+			   me.views, me.reuses, me.created_at, me.updated_at, me.expires_at,
 			   COALESCE(v.vscore, 0) * $4 + COALESCE(f.fscore, 0) * (1 - $4) AS score
 		FROM hives me
 		JOIN users u ON u.id = me.user_id
@@ -259,7 +287,7 @@ func (s *HiveStore) SearchHybrid(ctx context.Context, hiveshareID uuid.UUID, emb
 		  AND (v.id IS NOT NULL OR f.id IS NOT NULL)
 		  %s
 		ORDER BY score DESC
-		LIMIT $%d`, sourceFilter, n)
+		LIMIT $%d`, extraClause, n)
 
 	return s.scanRowsWithScore(ctx, q, args...)
 }
@@ -272,13 +300,14 @@ func (s *HiveStore) FindSimilar(ctx context.Context, hiveshareID uuid.UUID, sour
 		`SELECT me.id, me.hiveshare_id, me.user_id, u.name,
 		        me.source_type, me.source_ref, me.source_url,
 		        me.tool, me.content, me.summary, me.tags, me.metadata,
-		        me.views, me.reuses, me.created_at, me.updated_at,
+		        me.views, me.reuses, me.created_at, me.updated_at, me.expires_at,
 		        1 - (me.embedding <=> $3) AS score
 		 FROM hives me
 		 JOIN users u ON u.id = me.user_id
 		 WHERE me.hiveshare_id = $1
 		   AND me.source_ref = $2
 		   AND me.embedding IS NOT NULL
+		   AND (me.expires_at IS NULL OR me.expires_at > NOW())
 		   AND 1 - (me.embedding <=> $3) >= $4
 		 ORDER BY score DESC
 		 LIMIT 1`,
@@ -327,7 +356,7 @@ func (s *HiveStore) scanRows(ctx context.Context, q string, args ...interface{})
 		if err := rows.Scan(&e.ID, &e.HiveshareID, &e.UserID, &e.UserName,
 			&e.SourceType, &e.SourceRef, &e.SourceURL, &e.Tool,
 			&e.Content, &e.Summary, &e.Tags, &e.Metadata, &e.Views, &e.Reuses,
-			&e.CreatedAt, &e.UpdatedAt); err != nil {
+			&e.CreatedAt, &e.UpdatedAt, &e.ExpiresAt); err != nil {
 			return nil, err
 		}
 		result = append(result, &e)
@@ -348,7 +377,7 @@ func (s *HiveStore) scanRowsWithScore(ctx context.Context, q string, args ...int
 		if err := rows.Scan(&e.ID, &e.HiveshareID, &e.UserID, &e.UserName,
 			&e.SourceType, &e.SourceRef, &e.SourceURL, &e.Tool,
 			&e.Content, &e.Summary, &e.Tags, &e.Metadata, &e.Views, &e.Reuses,
-			&e.CreatedAt, &e.UpdatedAt, &e.Score); err != nil {
+			&e.CreatedAt, &e.UpdatedAt, &e.ExpiresAt, &e.Score); err != nil {
 			return nil, err
 		}
 		result = append(result, &e)
