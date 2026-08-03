@@ -3,8 +3,8 @@ set -euo pipefail
 
 # dev-local.sh — one-command local development setup
 #
-# Starts Postgres + Redis, runs migrations, and launches the server.
-# No Docker image required — builds and runs from source.
+# Builds the server image, starts all three containers (Postgres, Redis,
+# hiveshare-server), runs migrations, and tails logs.
 #
 # Usage:
 #   ./scripts/dev-local.sh           # start everything
@@ -46,7 +46,7 @@ for arg in "$@"; do
         --help|-h)
             echo "Usage: $0 [--reset] [--stop]"
             echo "  --reset  Wipe the database volume and start fresh"
-            echo "  --stop   Stop containers and exit"
+            echo "  --stop   Stop all containers and exit"
             exit 0 ;;
         *) die "Unknown argument: $arg" ;;
     esac
@@ -56,20 +56,21 @@ done
 
 step "Checking prerequisites"
 
-command -v go &>/dev/null || die "Go is not installed. https://go.dev/doc/install"
-GO_VERSION=$(go version | awk '{print $3}' | tr -d 'go')
-ok "Go $GO_VERSION found"
-
 command -v jq &>/dev/null || warn "jq not found — smoke tests will not run (brew install jq / apt install jq)"
 command -v curl &>/dev/null || warn "curl not found — smoke tests will not run"
 
 ok "$RUNTIME compose found"
 
+if [ "${JWT_SECRET:-}" = "" ]; then
+    warn "JWT_SECRET not set — using insecure dev default. Set it for production."
+    export JWT_SECRET="dev-secret-change-in-production"
+fi
+
 # ── Stop mode ─────────────────────────────────────────────────────────────────
 
 if [ "$STOP" -eq 1 ]; then
     step "Stopping containers"
-    $COMPOSE down
+    $COMPOSE --profile server down
     ok "Stopped"
     exit 0
 fi
@@ -81,81 +82,72 @@ if [ "$RESET" -eq 1 ]; then
     warn "This will delete ALL local hiveshare data"
     read -rp "  Type 'yes' to confirm: " confirm
     [ "$confirm" = "yes" ] || { info "Aborted."; exit 0; }
-    $COMPOSE down -v
+    $COMPOSE --profile server down -v
     ok "Volume wiped"
 fi
 
-# ── Start containers ──────────────────────────────────────────────────────────
+# ── Start infra (Postgres + Redis) ────────────────────────────────────────────
 
 step "Starting Postgres + Redis"
-$COMPOSE up -d
+$COMPOSE up -d  # no --profile server yet — infra only first
 
-# Wait for Postgres
 info "Waiting for Postgres to be healthy..."
 for i in $(seq 1 30); do
     if $COMPOSE exec -T postgres pg_isready -U hiveshare -q 2>/dev/null; then
         ok "Postgres ready"
         break
     fi
-    if [ "$i" -eq 30 ]; then
-        die "Postgres did not become healthy in 30s. Check: $RUNTIME compose logs postgres"
-    fi
+    [ "$i" -eq 30 ] && die "Postgres did not become healthy in 30s. Check: $RUNTIME compose logs postgres"
     sleep 1
 done
 
-# Wait for Redis
 info "Waiting for Redis..."
 for i in $(seq 1 15); do
     if $COMPOSE exec -T redis redis-cli ping 2>/dev/null | grep -q PONG; then
         ok "Redis ready"
         break
     fi
-    if [ "$i" -eq 15 ]; then
-        die "Redis did not become healthy in 15s. Check: $RUNTIME compose logs redis"
-    fi
+    [ "$i" -eq 15 ] && die "Redis did not become healthy in 15s. Check: $RUNTIME compose logs redis"
     sleep 1
 done
 
 # ── Migrations ────────────────────────────────────────────────────────────────
 
 step "Applying migrations"
-POSTGRES_URL="postgres://hiveshare:hiveshare@localhost:5432/hiveshare?sslmode=disable"
-
 for f in migrations/*.sql; do
     name=$(basename "$f")
     if $COMPOSE exec -T postgres psql -U hiveshare -d hiveshare -f - < "$f" &>/dev/null; then
         ok "$name"
     else
-        die "Migration failed: $name"
+        die "Migration failed: $name — check: $RUNTIME compose logs postgres"
     fi
 done
 
-# ── Build ─────────────────────────────────────────────────────────────────────
+# ── Build + start server container ────────────────────────────────────────────
 
-step "Building server"
-COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-BUILDTIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS="-s -w -X github.com/KB-perByte/hiveshare/internal/version.Commit=${COMMIT} -X github.com/KB-perByte/hiveshare/internal/version.BuildTime=${BUILDTIME}"
-go build -ldflags="$LDFLAGS" -o bin/hiveshare-server ./cmd/server
-ok "bin/hiveshare-server built (commit=$COMMIT)"
+step "Building server image"
+$COMPOSE --profile server build hiveshare
+ok "Image built"
 
-# ── Env ───────────────────────────────────────────────────────────────────────
+step "Starting server container"
+$COMPOSE --profile server up -d hiveshare
 
-export DATABASE_URL="${DATABASE_URL:-$POSTGRES_URL}"
-export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
-export LISTEN_ADDR="${LISTEN_ADDR:-:8080}"
-export EMBED_PROVIDER="${EMBED_PROVIDER:-}"
-export JWT_SECRET="${JWT_SECRET:-dev-secret-change-in-production}"
+info "Waiting for server to be healthy..."
+for i in $(seq 1 30); do
+    STATUS=$(curl -s http://localhost:8080/health 2>/dev/null | grep -o '"status":"ok"' || true)
+    if [ "$STATUS" = '"status":"ok"' ]; then
+        ok "Server healthy"
+        break
+    fi
+    [ "$i" -eq 30 ] && die "Server did not become healthy. Check: $RUNTIME compose logs hiveshare"
+    sleep 2
+done
 
-if [ "$JWT_SECRET" = "dev-secret-change-in-production" ]; then
-    warn "JWT_SECRET is using the insecure dev default. Set JWT_SECRET in your environment for production."
-fi
-
-# ── Launch ────────────────────────────────────────────────────────────────────
+# ── Done ──────────────────────────────────────────────────────────────────────
 
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║  HiveShare dev server starting                       ║${NC}"
+echo -e "${BOLD}║  HiveShare is running                                ║${NC}"
 echo -e "${BOLD}║                                                      ║${NC}"
 echo -e "${BOLD}║  API:    http://localhost:8080                       ║${NC}"
 echo -e "${BOLD}║  Health: http://localhost:8080/health                ║${NC}"
@@ -167,9 +159,10 @@ echo -e "${BOLD}║    curl -X POST http://localhost:8080/api/v1/auth/register \
 echo -e "${BOLD}║      -H 'Content-Type: application/json' \\           ║${NC}"
 echo -e "${BOLD}║      -d '{\"email\":\"you@dev.local\",\"name\":\"You\"}'     ║${NC}"
 echo -e "${BOLD}║                                                      ║${NC}"
-echo -e "${BOLD}║  Stop containers: ./scripts/dev-local.sh --stop     ║${NC}"
-echo -e "${BOLD}║  Wipe and reset:  ./scripts/dev-local.sh --reset    ║${NC}"
+echo -e "${BOLD}║  Logs:   $RUNTIME compose logs -f hiveshare          ║${NC}"
+echo -e "${BOLD}║  Stop:   ./scripts/dev-local.sh --stop               ║${NC}"
+echo -e "${BOLD}║  Reset:  ./scripts/dev-local.sh --reset              ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
-
-exec bin/hiveshare-server
+info "Tailing server logs (Ctrl-C to detach — containers keep running):"
+$COMPOSE logs -f hiveshare

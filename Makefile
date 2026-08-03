@@ -83,7 +83,7 @@ dev: docker-up
 	    sleep 1; \
 	done
 	@$(MAKE) migrate
-	@echo "Starting server (no embeddings — set EMBED_PROVIDER to enable)..."
+	@echo "Starting server on host (no embeddings). Use ./scripts/dev-local.sh to run fully containerised."
 	JWT_SECRET=$${JWT_SECRET:-dev-secret-change-in-production} EMBED_PROVIDER= go run ./cmd/server
 
 docker-up:
