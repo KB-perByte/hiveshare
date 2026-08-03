@@ -22,9 +22,21 @@ smoke_summary() {
 smoke_register() {
     local suffix="$1"
     local name="$2"
-    local ts
+    local ts result code
     ts=$(date +%s%N)
-    curl -sf -X POST "$SMOKE_BASE/auth/register" \
-        -H "Content-Type: application/json" \
-        -d "{\"email\":\"${suffix}-${ts}@test.local\",\"name\":\"${name}\"}"
+    # Retry up to 3 times with a short backoff in case the public rate limit
+    # (10 req/min by IP) is transiently hit during rapid test runs.
+    for i in 1 2 3; do
+        code=$(curl -s -o "$SMOKE_TMPDIR/reg_${suffix}.json" -w "%{http_code}" \
+            -X POST "$SMOKE_BASE/auth/register" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"${suffix}-${ts}@test.local\",\"name\":\"${name}\"}")
+        if [ "$code" = "201" ]; then
+            cat "$SMOKE_TMPDIR/reg_${suffix}.json"
+            return
+        fi
+        [ "$code" = "429" ] && sleep 7 || { echo "register failed ($code)"; return 1; }
+    done
+    echo "register failed after retries"
+    return 1
 }

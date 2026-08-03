@@ -49,19 +49,28 @@ sequenceDiagram
 
 ## Quick start
 
-### 1 — Start the server (Docker)
+### 1 — Start the server
+
+**From source (recommended for local dev):**
 
 ```bash
-curl -O https://raw.githubusercontent.com/KB-perByte/hiveshare/main/docker-compose.full.yml
-curl -O https://raw.githubusercontent.com/KB-perByte/hiveshare/main/.env.example
-cp .env.example .env
-# Edit .env: set a strong POSTGRES_PASSWORD and your BASE_URL
-nano .env
+git clone https://github.com/KB-perByte/hiveshare
+cd hiveshare
+./scripts/dev-local.sh
+```
 
+That's it. The script checks prerequisites, starts Postgres + Redis via Docker/Podman, runs migrations, builds the server, and launches it at `http://localhost:8080`. Pass `--reset` to wipe and start fresh, `--stop` to shut containers down.
+
+**Docker Compose (full stack):**
+
+```bash
+cp .env.example .env
+# Edit .env — set POSTGRES_PASSWORD, BASE_URL, JWT_SECRET (openssl rand -hex 32)
+nano .env
 docker compose -f docker-compose.full.yml up -d
 ```
 
-The server is now running at `http://localhost:8080` (or your `BASE_URL`).
+The server is now running at `http://localhost:8080` (or your `BASE_URL`). Requires a published Docker image; use the from-source path if you're running off this repo directly.
 
 ### 2 — Install the CLI
 

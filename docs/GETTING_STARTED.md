@@ -253,10 +253,17 @@ You never need to tell it to — the MCP tools run in the background.
 ```bash
 git clone https://github.com/KB-perByte/hiveshare
 cd hiveshare
-
-# Start Postgres + Redis, run migrations, start server
-make dev
+./scripts/dev-local.sh
 ```
+
+`dev-local.sh` checks prerequisites (Go, Docker or Podman), starts Postgres + Redis, waits for them to be healthy, runs all migrations, builds the server binary, and launches it at `http://localhost:8080`.
+
+```
+./scripts/dev-local.sh --reset   # wipe the DB volume and start fresh
+./scripts/dev-local.sh --stop    # stop containers
+```
+
+Alternatively, `make dev` does the same thing without the guided output.
 
 ### Production setup
 

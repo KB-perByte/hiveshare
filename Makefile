@@ -74,11 +74,17 @@ migrate:
 # ── Dev ───────────────────────────────────────────────────────────────────────
 
 dev: docker-up
-	@echo "Waiting for postgres..."
-	@sleep 3
+	@echo "Waiting for postgres to be healthy..."
+	@for i in $$(seq 1 30); do \
+	    if $(CONTAINER_RUNTIME) compose exec -T $(POSTGRES_SERVICE) pg_isready -U hiveshare -q 2>/dev/null; then \
+	        echo "  postgres ready"; break; \
+	    fi; \
+	    if [ "$$i" -eq 30 ]; then echo "  postgres did not become ready in time"; exit 1; fi; \
+	    sleep 1; \
+	done
 	@$(MAKE) migrate
-	@echo "Starting server..."
-	EMBED_PROVIDER= go run ./cmd/server
+	@echo "Starting server (no embeddings — set EMBED_PROVIDER to enable)..."
+	JWT_SECRET=$${JWT_SECRET:-dev-secret-change-in-production} EMBED_PROVIDER= go run ./cmd/server
 
 docker-up:
 	$(CONTAINER_RUNTIME) compose up -d
@@ -149,7 +155,8 @@ clean:
 help:
 	@echo "HiveShare Makefile targets:"
 	@echo ""
-	@echo "  make dev            Start docker, run migrations, start server"
+	@echo "  ./scripts/dev-local.sh         One-command local dev setup (build + docker + migrate + run)"
+	@echo "  make dev            Start docker, run migrations, start server (same, less output)"
 	@echo "  make build          Build all binaries to ./bin/"
 	@echo "  make server         Build API server (embeds git commit + build time)"
 	@echo "  make server-linux   Cross-compile API for EC2 Ubuntu amd64"

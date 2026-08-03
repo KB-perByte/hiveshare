@@ -106,6 +106,42 @@ DEL_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
     "$SMOKE_BASE/hiveshares/$HS_ID/hives/$DEL_ID" -H "$AUTH_A")
 smoke_check "$DEL_CODE" "204" "delete returns 204"
 
+smoke_section "TTL / expires_at"
+
+# Create with ttl_seconds — entry should appear immediately
+TTL_CREATE=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives" \
+    -H "$AUTH_A" -H "Content-Type: application/json" \
+    -d '{"source_type":"manual","source_ref":"ttl-test","content":"expires soon","ttl_seconds":2}')
+TTL_ID=$(echo "$TTL_CREATE" | jq -r '.id')
+TTL_EXPIRES=$(echo "$TTL_CREATE" | jq -r '.expires_at')
+[ "$TTL_EXPIRES" != "null" ] && [ -n "$TTL_EXPIRES" ] && smoke_ok "expires_at set on create" || smoke_fail "expires_at missing after ttl_seconds create"
+
+# Should be findable right now
+FIND_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$SMOKE_BASE/hiveshares/$HS_ID/hives/$TTL_ID" -H "$AUTH_A")
+smoke_check "$FIND_CODE" "200" "TTL hive visible before expiry"
+
+# max_age_seconds: recent hive appears in search, very stale filter excludes it
+FRESH=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives/search" \
+    -H "$AUTH_A" -H "Content-Type: application/json" \
+    -d '{"query":"expires soon","max_age_seconds":60}' | jq '.count')
+[ "$FRESH" -ge 1 ] && smoke_ok "max_age_seconds=60 includes recent hive" || smoke_fail "max_age_seconds=60 should return >=1 result"
+
+# max_age_seconds=0 means no filter
+NO_FILTER=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives/search" \
+    -H "$AUTH_A" -H "Content-Type: application/json" \
+    -d '{"query":"expires soon","max_age_seconds":0}' | jq '.count')
+[ "$NO_FILTER" -ge 1 ] && smoke_ok "max_age_seconds=0 disables filter" || smoke_fail "max_age_seconds=0 should return >=1 result"
+
+# Wait for TTL to expire then check it's gone
+sleep 3
+EXPIRED_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$SMOKE_BASE/hiveshares/$HS_ID/hives/$TTL_ID" -H "$AUTH_A")
+smoke_check "$EXPIRED_CODE" "404" "expired hive returns 404"
+
+EXPIRED_SEARCH=$(curl -sf -X POST "$SMOKE_BASE/hiveshares/$HS_ID/hives/search" \
+    -H "$AUTH_A" -H "Content-Type: application/json" \
+    -d '{"query":"expires soon"}' | jq '.count')
+[ "$EXPIRED_SEARCH" -eq 0 ] && smoke_ok "expired hive excluded from search" || smoke_fail "expired hive should not appear in search"
+
 smoke_section "Cleanup"
 curl -sf -X DELETE "$SMOKE_BASE/hiveshares/$HS_ID" -H "$AUTH_A" > /dev/null
 smoke_ok "cleaned up"

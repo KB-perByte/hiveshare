@@ -24,6 +24,9 @@ run_suite() {
         TOTAL_FAIL=$((TOTAL_FAIL+1))
         FAILED_SUITES="$FAILED_SUITES $name"
     fi
+    # Pause between suites so the public registration rate limit (10/min by IP)
+    # has time to partially recover. Each suite may register 1-3 users.
+    sleep 15
 }
 
 # Connectivity first — bail if server is unreachable
